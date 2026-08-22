@@ -2323,6 +2323,35 @@ def test_id_oltre_il_massimo_solleva() -> None:
 def test_to_wire_rifiuta_un_id_non_valido() -> None:
     with pytest.raises(ValueError):
         to_wire("uuid-non-valido", "text", "T", RECT, {"text": "x"})
+
+
+def test_le_tile_di_umidita_conservano_tutto_il_contenuto() -> None:
+    """relativeHumidity e absoluteHumidity sono fuori da CONTENT_WHITELIST di proposito.
+
+    Nel client web di SwitchBot non hanno whitelist di contenuto pur essendo
+    tile Metric. Sembra una dimenticanza ma è il comportamento reale del
+    renderer: se qualcuno le aggiungesse alla whitelist, questo test lo rileva.
+    """
+    for widget_type in ("relativeHumidity", "absoluteHumidity"):
+        extra = json.loads(
+            to_wire(
+                "1",
+                widget_type,
+                "Tile",
+                RECT,
+                {
+                    "icon": "humidity-drop",
+                    "label": "Bagno",
+                    "value": "55",
+                    "unit": "%",
+                    "fuoriWhitelist": "conservato",
+                },
+            )["extra"]
+        )
+
+        assert extra["content"]["fuoriWhitelist"] == "conservato", (
+            f"{widget_type} non deve filtrare il contenuto"
+        )
 ```
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
@@ -2425,8 +2454,8 @@ def to_wire(
 
 - [ ] **Step 4: Eseguire i test e verificare che passino**
 
-Run: `pytest tests/layout/test_widgets.py -v`
-Expected: PASS, 14 test
+Run: `.venv/bin/pytest tests/layout/test_widgets.py -v`
+Expected: PASS, 16 test
 
 - [ ] **Step 5: Commit**
 
