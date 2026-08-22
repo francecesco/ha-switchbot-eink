@@ -3120,6 +3120,26 @@ def test_hash_diverso_se_il_contenuto_cambia() -> None:
     )
 
     assert components_hash(uno) != components_hash(due)
+
+
+def test_sovrapposizione_fra_card_non_adiacenti_viene_rilevata() -> None:
+    """Il confronto guarda tutte le card precedenti, non solo l'ultima.
+
+    Qui la prima e la terza si sovrappongono mentre la seconda sta per conto
+    suo: un controllo che confrontasse solo con la card precedente lascerebbe
+    passare la pagina.
+    """
+    with pytest.raises(LayoutError, match="0 e 2"):
+        compila(
+            {
+                "page": "custom1",
+                "cards": [
+                    {"type": "text", "text": "a", "position": [0, 0, 200, 100]},
+                    {"type": "text", "text": "b", "position": [400, 0, 200, 100]},
+                    {"type": "text", "text": "c", "position": [100, 50, 200, 100]},
+                ],
+            }
+        )
 ```
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
@@ -3300,7 +3320,7 @@ __all__ = [
 - [ ] **Step 5: Eseguire i test e verificare che passino**
 
 Run: `.venv/bin/pytest tests/layout -v`
-Expected: PASS, 61 test in totale
+Expected: PASS, 69 test in totale
 
 - [ ] **Step 6: Commit**
 
