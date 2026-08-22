@@ -654,7 +654,7 @@ git commit -m "feat(api): aggiungi client HTTP con retry singolo su 401"
 
 **Interfaces:**
 - Consumes: da Task 1 — `unwrap_account`, costanti; da Task 2 — `CanvasHttp`.
-- Produces: dataclass `Tokens(access_token: str, refresh_token: str, token_type: str, expires_in: int, refresh_expires_in: int)`, dataclass `UserInfo(user_id: str, email: str)`, classe `CanvasAuth(session, region)` con `async login(username, password) -> Tokens`, `async refresh(user_id, refresh_token) -> Tokens`, `async user_info(access_header: str) -> UserInfo`.
+- Produces: dataclass `Tokens(access_token: str, refresh_token: str, token_type: str, expires_in: int, refresh_expires_in: int)`, dataclass `UserInfo(user_id: str, email: str)`, classe `CanvasAuth(session, region)` con `async login(username, password) -> Tokens`, `async refresh(user_id, refresh_token) -> Tokens`, `async user_info(access_token: str, token_type: str = "Bearer") -> UserInfo`.
 
 Il refresh richiede lo `userId`, che si ottiene solo da `/userinfo`: chi consuma questo modulo deve persistere entrambi.
 
