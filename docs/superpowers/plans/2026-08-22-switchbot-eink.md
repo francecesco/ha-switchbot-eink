@@ -161,6 +161,7 @@ import pytest
 from custom_components.switchbot_eink.api.envelope import (
     backend_base_url,
     build_auth_header,
+    normalize_region,
     unwrap_account,
     unwrap_backend,
 )
@@ -184,6 +185,19 @@ def test_auth_header_rimuove_bearer_nella_regione_eu() -> None:
 
 def test_auth_header_eu_e_insensibile_alle_maiuscole() -> None:
     assert build_auth_header("abc123", "bearer", "eu") == "abc123"
+
+
+def test_auth_header_rimuove_bearer_anche_con_regione_maiuscola() -> None:
+    assert build_auth_header("abc123", "Bearer", "EU") == "abc123"
+
+
+def test_normalize_region_accetta_maiuscole_e_spazi() -> None:
+    assert normalize_region(" EU ") == "eu"
+
+
+def test_normalize_region_rifiuta_una_regione_sconosciuta() -> None:
+    with pytest.raises(ValueError, match="sconosciuta"):
+        normalize_region("xx")
 
 
 def test_backend_base_url_interpola_la_regione() -> None:
@@ -334,9 +348,23 @@ def build_auth_header(access_token: str, token_type: str | None, region: str) ->
     produce 401 senza spiegazione.
     """
     header = f"{token_type or 'Bearer'} {access_token}"
-    if region == "eu":
+    if region.strip().lower() == "eu":
         header = _BEARER_PREFIX.sub("", header)
     return header
+
+
+def normalize_region(value: str) -> str:
+    """Normalizza il nome di una regione, rifiutando quelle sconosciute.
+
+    `backend_base_url` ricade su `us` per qualunque valore non riconosciuto:
+    è una rete di sicurezza ragionevole per il codice, ma pessima all'ingresso,
+    dove un errore di battitura diventerebbe una richiesta al server sbagliato
+    con l'header sbagliato, e un 401 che non spiega niente.
+    """
+    normalized = value.strip().lower()
+    if normalized not in REGIONS:
+        raise ValueError(f"regione {value!r} sconosciuta: usa una fra {', '.join(REGIONS)}")
+    return normalized
 
 
 def backend_base_url(region: str) -> str:
@@ -373,8 +401,8 @@ def unwrap_account(payload: object) -> Any:
 
 - [ ] **Step 8: Eseguire i test e verificare che passino**
 
-Run: `pytest tests/api/test_envelope.py -v`
-Expected: PASS, 13 test
+Run: `.venv/bin/pytest tests/api/test_envelope.py -v`
+Expected: PASS, 16 test
 
 - [ ] **Step 9: Commit**
 
@@ -1413,7 +1441,7 @@ __all__ = [
 - [ ] **Step 6: Eseguire i test e verificare che passino**
 
 Run: `.venv/bin/pytest tests/api -v`
-Expected: PASS, 42 test in totale
+Expected: PASS, 45 test in totale
 
 - [ ] **Step 7: Commit**
 
@@ -1453,7 +1481,9 @@ from __future__ import annotations
 
 import json
 
-from tools.probe import build_clock_component
+import pytest
+
+from tools.probe import build_clock_component, read_credentials
 
 
 def test_build_clock_component_produce_css_ed_extra_come_stringhe() -> None:
@@ -1484,6 +1514,37 @@ def test_build_clock_component_contiene_il_testo() -> None:
     assert extra["content"]["text"] == "12:34:56"
     assert extra["source"] == "custom"
     assert extra["dataMode"] == "text"
+
+
+def test_credenziali_mancanti_spiegano_cosa_impostare(monkeypatch) -> None:
+    monkeypatch.delenv("SWITCHBOT_USER", raising=False)
+    monkeypatch.setenv("SWITCHBOT_PASS", "segreta")
+
+    with pytest.raises(SystemExit) as errore:
+        read_credentials()
+
+    assert "SWITCHBOT_USER" in str(errore.value)
+
+
+def test_regione_non_valida_viene_rifiutata_subito(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCHBOT_USER", "mario@example.test")
+    monkeypatch.setenv("SWITCHBOT_PASS", "segreta")
+    monkeypatch.setenv("SWITCHBOT_REGION", "italia")
+
+    with pytest.raises(SystemExit) as errore:
+        read_credentials()
+
+    assert "SWITCHBOT_REGION" in str(errore.value)
+
+
+def test_la_regione_viene_normalizzata(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCHBOT_USER", "mario@example.test")
+    monkeypatch.setenv("SWITCHBOT_PASS", "segreta")
+    monkeypatch.setenv("SWITCHBOT_REGION", " EU ")
+
+    _username, _password, regione = read_credentials()
+
+    assert regione == "eu"
 ```
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
@@ -1526,6 +1587,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from custom_components.switchbot_eink.api.auth import CanvasAuth  # noqa: E402
 from custom_components.switchbot_eink.api.client import SwitchBotCanvasClient  # noqa: E402
+from custom_components.switchbot_eink.api.envelope import normalize_region  # noqa: E402
+from custom_components.switchbot_eink.api.errors import SwitchBotCanvasError  # noqa: E402
 from custom_components.switchbot_eink.api.models import Template  # noqa: E402
 
 
@@ -1647,10 +1710,32 @@ def build_metric_components() -> list[dict[str, str]]:
     ]
 
 
+def read_credentials() -> tuple[str, str, str]:
+    """Legge le credenziali dall'ambiente, spiegando cosa manca invece di esplodere."""
+    mancanti = [
+        nome for nome in ("SWITCHBOT_USER", "SWITCHBOT_PASS") if not os.environ.get(nome)
+    ]
+    if mancanti:
+        raise SystemExit(
+            "Variabili d'ambiente mancanti: "
+            + ", ".join(mancanti)
+            + "\nImpostale prima di eseguire la sonda:\n"
+            "  export SWITCHBOT_USER=tua@email\n"
+            "  export SWITCHBOT_PASS='la tua password'\n"
+            "  export SWITCHBOT_REGION=eu"
+        )
+
+    grezza = os.environ.get("SWITCHBOT_REGION", "eu")
+    try:
+        regione = normalize_region(grezza)
+    except ValueError as err:
+        raise SystemExit(f"SWITCHBOT_REGION non valida: {err}") from err
+
+    return os.environ["SWITCHBOT_USER"], os.environ["SWITCHBOT_PASS"], regione
+
+
 async def _connect(session: aiohttp.ClientSession) -> tuple[SwitchBotCanvasClient, str]:
-    username = os.environ["SWITCHBOT_USER"]
-    password = os.environ["SWITCHBOT_PASS"]
-    region = os.environ.get("SWITCHBOT_REGION", "eu")
+    username, password, region = read_credentials()
 
     auth = CanvasAuth(session, region)
     tokens = await auth.login(username, password)
@@ -1673,6 +1758,12 @@ async def _publish(
 ) -> None:
     """Riusa il template già presente sullo slot, altrimenti ne crea uno."""
     existing = [t for t in await client.list_templates(device_id) if t.page_slot == slot]
+    if len(existing) > 1:
+        print(
+            f"Attenzione: sullo slot {slot} ci sono {len(existing)} template. "
+            f"Aggiorno il primo (id {existing[0].template_id}); gli altri restano inutilizzati "
+            "e potrebbero confondere la misura."
+        )
     template = Template(
         template_id=existing[0].template_id if existing else None,
         name=name,
@@ -1696,36 +1787,46 @@ async def main() -> None:
     parser.add_argument(
         "command", choices=["devices", "clock", "origin", "metric", "templates"]
     )
-    parser.add_argument("--slot", default="custom1", help="custom1..custom4")
+    parser.add_argument(
+        "--slot",
+        default="custom1",
+        choices=("custom1", "custom2", "custom3", "custom4"),
+        help="pagina custom su cui pubblicare",
+    )
     args = parser.parse_args()
 
-    async with aiohttp.ClientSession() as session:
-        client, device_id = await _connect(session)
+    try:
+        async with aiohttp.ClientSession() as session:
+            client, device_id = await _connect(session)
 
-        if args.command == "devices":
-            for device in await client.list_devices():
-                print(f"  {device.device_id}  {device.device_type:<12} {device.device_name}")
+            if args.command == "devices":
+                for device in await client.list_devices():
+                    print(
+                        f"  {device.device_id}  {device.device_type:<12} {device.device_name}"
+                    )
 
-        elif args.command == "templates":
-            for summary in await client.list_templates(device_id):
-                print(f"  {summary.template_id}  {summary.page_slot:<12} {summary.name}")
+            elif args.command == "templates":
+                for summary in await client.list_templates(device_id):
+                    print(f"  {summary.template_id}  {summary.page_slot:<12} {summary.name}")
 
-        elif args.command == "clock":
-            now = datetime.now().strftime("%H:%M:%S")
-            await _publish(
-                client, device_id, args.slot, "Sonda orologio", [build_clock_component(now)]
-            )
-            print(f"Orario pubblicato: {now}")
+            elif args.command == "clock":
+                now = datetime.now().strftime("%H:%M:%S")
+                await _publish(
+                    client, device_id, args.slot, "Sonda orologio", [build_clock_component(now)]
+                )
+                print(f"Orario pubblicato: {now}")
 
-        elif args.command == "origin":
-            await _publish(
-                client, device_id, args.slot, "Sonda origine", build_origin_components()
-            )
+            elif args.command == "origin":
+                await _publish(
+                    client, device_id, args.slot, "Sonda origine", build_origin_components()
+                )
 
-        elif args.command == "metric":
-            await _publish(
-                client, device_id, args.slot, "Sonda metric", build_metric_components()
-            )
+            elif args.command == "metric":
+                await _publish(
+                    client, device_id, args.slot, "Sonda metric", build_metric_components()
+                )
+    except SwitchBotCanvasError as err:
+        raise SystemExit(f"Errore nel dialogo con SwitchBot: {err}") from err
 
 
 if __name__ == "__main__":
@@ -1734,8 +1835,8 @@ if __name__ == "__main__":
 
 - [ ] **Step 4: Eseguire i test e verificare che passino**
 
-Run: `pytest tests/test_probe.py -v`
-Expected: PASS, 4 test
+Run: `.venv/bin/pytest tests/test_probe.py -v`
+Expected: PASS, 7 test
 
 - [ ] **Step 5: Commit del codice della sonda**
 
