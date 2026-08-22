@@ -6,7 +6,7 @@
 
 **Architecture:** Tre strati con dipendenza unidirezionale. Lo strato `api/` parla l'API privata del canvas editor SwitchBot e non importa nulla da Home Assistant, così è eseguibile e diagnosticabile da riga di comando. Lo strato `layout/` è un compilatore puro che trasforma una definizione YAML dichiarativa più i valori degli stati in componenti nel wire format. Lo strato Home Assistant contiene solo config flow, coordinator, servizi ed entità diagnostiche.
 
-**Tech Stack:** Python 3.13, `aiohttp`, `voluptuous`, `pytest`, `pytest-asyncio`, `aioresponses`, `pytest-homeassistant-custom-component`.
+**Tech Stack:** Python 3.13+, `aiohttp`, `voluptuous`, `pytest`, `pytest-asyncio`, `pytest-homeassistant-custom-component` (il cui `AiohttpClientMocker` mocka anche i test dello strato API).
 
 **Spec:** `docs/superpowers/specs/2026-08-22-switchbot-eink-ha-design.md`
 
@@ -125,7 +125,6 @@ dependencies = ["aiohttp>=3.9", "voluptuous>=0.13"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "aioresponses>=0.7.6",
     "pytest-homeassistant-custom-component>=0.13",
 ]
 
@@ -403,108 +402,159 @@ File `tests/api/test_http.py`:
 """Test del client HTTP."""
 from __future__ import annotations
 
-import aiohttp
+import asyncio
+
 import pytest
-from aioresponses import aioresponses
+from pytest_homeassistant_custom_component.test_util.aiohttp import (
+    AiohttpClientMockResponse,
+    mock_aiohttp_client,
+)
+from yarl import URL
 
 from custom_components.switchbot_eink.api.envelope import unwrap_backend
-from custom_components.switchbot_eink.api.errors import SwitchBotCanvasAuthError
+from custom_components.switchbot_eink.api.errors import (
+    SwitchBotCanvasApiError,
+    SwitchBotCanvasAuthError,
+)
 from custom_components.switchbot_eink.api.http import CanvasHttp
 
 BASE = "https://example.test/productbiz"
+PING = f"{BASE}/ping"
+
+
+def response_sequence(*responses):
+    """Restituisce risposte diverse a chiamate successive sullo stesso URL."""
+    iterator = iter(responses)
+
+    async def _side_effect(method, url, data):
+        return next(iterator)
+
+    return _side_effect
+
+
+def json_response(payload, status=200):
+    return AiohttpClientMockResponse("post", URL(PING), status=status, json=payload)
+
+
+def empty_response(status):
+    return AiohttpClientMockResponse("post", URL(PING), status=status)
 
 
 @pytest.fixture
-async def session():
-    async with aiohttp.ClientSession() as sess:
-        yield sess
+async def aioclient():
+    with mock_aiohttp_client() as mocker:
+        yield mocker
 
 
-async def test_request_invia_post_json_e_scarta_envelope(session) -> None:
+@pytest.fixture
+async def session(aioclient):
+    sess = aioclient.create_session(asyncio.get_running_loop())
+    yield sess
+    await sess.close()
+
+
+async def test_request_invia_post_json_e_scarta_envelope(aioclient, session) -> None:
+    aioclient.post(PING, json={"resultCode": 100, "data": {"pong": 1}})
     http = CanvasHttp(session, BASE, unwrap_backend)
-    with aioresponses() as mocked:
-        mocked.post(f"{BASE}/ping", payload={"resultCode": 100, "data": {"pong": 1}})
-        assert await http.request("/ping", {"a": 1}) == {"pong": 1}
+
+    assert await http.request("/ping", {"a": 1}) == {"pong": 1}
 
 
-async def test_request_aggiunge_header_authorization(session) -> None:
+async def test_request_invia_il_body_come_json(aioclient, session) -> None:
+    aioclient.post(PING, json={"resultCode": 100, "data": None})
+    http = CanvasHttp(session, BASE, unwrap_backend)
+
+    await http.request("/ping", {"a": 1})
+    _method, _url, data, _headers = aioclient.mock_calls[0]
+
+    assert data == {"a": 1}
+
+
+async def test_request_aggiunge_header_authorization(aioclient, session) -> None:
+    aioclient.post(PING, json={"resultCode": 100, "data": None})
     http = CanvasHttp(session, BASE, unwrap_backend, auth_provider=lambda: "tok")
-    with aioresponses() as mocked:
-        mocked.post(f"{BASE}/ping", payload={"resultCode": 100, "data": None})
-        await http.request("/ping")
-        request = next(iter(mocked.requests.values()))[0]
-        assert request.kwargs["headers"]["Authorization"] == "tok"
+
+    await http.request("/ping")
+    _method, _url, _data, headers = aioclient.mock_calls[0]
+
+    assert headers["Authorization"] == "tok"
 
 
-async def test_request_omette_authorization_senza_provider(session) -> None:
+async def test_request_omette_authorization_senza_provider(aioclient, session) -> None:
+    aioclient.post(PING, json={"resultCode": 100, "data": None})
     http = CanvasHttp(session, BASE, unwrap_backend)
-    with aioresponses() as mocked:
-        mocked.post(f"{BASE}/ping", payload={"resultCode": 100, "data": None})
-        await http.request("/ping")
-        request = next(iter(mocked.requests.values()))[0]
-        assert "Authorization" not in request.kwargs["headers"]
+
+    await http.request("/ping")
+    _method, _url, _data, headers = aioclient.mock_calls[0]
+
+    assert "Authorization" not in headers
 
 
-async def test_401_http_tenta_il_refresh_e_ripete_una_volta(session) -> None:
+async def test_401_http_tenta_il_refresh_e_ripete_una_volta(aioclient, session) -> None:
     chiamate: list[str] = []
 
     async def refresh() -> bool:
         chiamate.append("refresh")
         return True
 
+    aioclient.post(
+        PING,
+        side_effect=response_sequence(
+            empty_response(401),
+            json_response({"resultCode": 100, "data": {"ok": True}}),
+        ),
+    )
     http = CanvasHttp(
         session, BASE, unwrap_backend, auth_provider=lambda: "tok", on_unauthorized=refresh
     )
-    with aioresponses() as mocked:
-        mocked.post(f"{BASE}/ping", status=401)
-        mocked.post(f"{BASE}/ping", payload={"resultCode": 100, "data": {"ok": True}})
-        assert await http.request("/ping") == {"ok": True}
+
+    assert await http.request("/ping") == {"ok": True}
     assert chiamate == ["refresh"]
 
 
-async def test_401_due_volte_solleva_auth_error(session) -> None:
+async def test_401_due_volte_solleva_auth_error(aioclient, session) -> None:
     async def refresh() -> bool:
         return True
 
+    aioclient.post(
+        PING,
+        side_effect=response_sequence(empty_response(401), empty_response(401)),
+    )
     http = CanvasHttp(
         session, BASE, unwrap_backend, auth_provider=lambda: "tok", on_unauthorized=refresh
     )
-    with aioresponses() as mocked:
-        mocked.post(f"{BASE}/ping", status=401)
-        mocked.post(f"{BASE}/ping", status=401)
-        with pytest.raises(SwitchBotCanvasAuthError):
-            await http.request("/ping")
+
+    with pytest.raises(SwitchBotCanvasAuthError):
+        await http.request("/ping")
 
 
-async def test_401_senza_refresh_disponibile_solleva_subito(session) -> None:
+async def test_401_senza_refresh_disponibile_solleva_subito(aioclient, session) -> None:
+    aioclient.post(PING, status=401)
     http = CanvasHttp(session, BASE, unwrap_backend, auth_provider=lambda: "tok")
-    with aioresponses() as mocked:
-        mocked.post(f"{BASE}/ping", status=401)
-        with pytest.raises(SwitchBotCanvasAuthError):
-            await http.request("/ping")
+
+    with pytest.raises(SwitchBotCanvasAuthError):
+        await http.request("/ping")
 
 
-async def test_refresh_fallito_solleva_auth_error(session) -> None:
+async def test_refresh_fallito_solleva_auth_error(aioclient, session) -> None:
     async def refresh() -> bool:
         return False
 
+    aioclient.post(PING, status=401)
     http = CanvasHttp(
         session, BASE, unwrap_backend, auth_provider=lambda: "tok", on_unauthorized=refresh
     )
-    with aioresponses() as mocked:
-        mocked.post(f"{BASE}/ping", status=401)
-        with pytest.raises(SwitchBotCanvasAuthError):
-            await http.request("/ping")
+
+    with pytest.raises(SwitchBotCanvasAuthError):
+        await http.request("/ping")
 
 
-async def test_errore_http_generico_solleva_api_error(session) -> None:
-    from custom_components.switchbot_eink.api.errors import SwitchBotCanvasApiError
-
+async def test_errore_http_generico_solleva_api_error(aioclient, session) -> None:
+    aioclient.post(PING, status=500)
     http = CanvasHttp(session, BASE, unwrap_backend)
-    with aioresponses() as mocked:
-        mocked.post(f"{BASE}/ping", status=500)
-        with pytest.raises(SwitchBotCanvasApiError):
-            await http.request("/ping")
+
+    with pytest.raises(SwitchBotCanvasApiError):
+        await http.request("/ping")
 ```
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
@@ -584,8 +634,8 @@ class CanvasHttp:
 
 - [ ] **Step 4: Eseguire i test e verificare che passino**
 
-Run: `pytest tests/api/test_http.py -v`
-Expected: PASS, 8 test
+Run: `.venv/bin/pytest tests/api/test_http.py -v`
+Expected: PASS, 9 test
 
 - [ ] **Step 5: Commit**
 
@@ -616,39 +666,50 @@ File `tests/api/test_auth.py`:
 """Test dell'autenticazione."""
 from __future__ import annotations
 
-import aiohttp
+import asyncio
+
 import pytest
-from aioresponses import aioresponses
+from pytest_homeassistant_custom_component.test_util.aiohttp import mock_aiohttp_client
 
 from custom_components.switchbot_eink.api.auth import CanvasAuth
 from custom_components.switchbot_eink.api.errors import SwitchBotCanvasAuthError
 
 ACCOUNT = "https://account.api.switchbot.net"
+LOGIN = f"{ACCOUNT}/account/api/v1/user/login"
+REFRESH = f"{ACCOUNT}/account/api/v1/user/token/refresh"
+USERINFO = f"{ACCOUNT}/account/api/v1/user/userinfo"
 
 
 @pytest.fixture
-async def session():
-    async with aiohttp.ClientSession() as sess:
-        yield sess
+async def aioclient():
+    with mock_aiohttp_client() as mocker:
+        yield mocker
 
 
-async def test_login_restituisce_i_token(session) -> None:
-    auth = CanvasAuth(session, "eu")
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{ACCOUNT}/account/api/v1/user/login",
-            payload={
-                "statusCode": 100,
-                "body": {
-                    "access_token": "AT",
-                    "refresh_token": "RT",
-                    "token_type": "Bearer",
-                    "expires_in": 3600,
-                    "refresh_expires_in": 86400,
-                },
+@pytest.fixture
+async def session(aioclient):
+    sess = aioclient.create_session(asyncio.get_running_loop())
+    yield sess
+    await sess.close()
+
+
+async def test_login_restituisce_i_token(aioclient, session) -> None:
+    aioclient.post(
+        LOGIN,
+        json={
+            "statusCode": 100,
+            "body": {
+                "access_token": "AT",
+                "refresh_token": "RT",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+                "refresh_expires_in": 86400,
             },
-        )
-        tokens = await auth.login("mario@example.test", "segreta")
+        },
+    )
+    auth = CanvasAuth(session, "eu")
+
+    tokens = await auth.login("mario@example.test", "segreta")
 
     assert tokens.access_token == "AT"
     assert tokens.refresh_token == "RT"
@@ -656,17 +717,16 @@ async def test_login_restituisce_i_token(session) -> None:
     assert tokens.expires_in == 3600
 
 
-async def test_login_invia_client_id_e_device_info(session) -> None:
+async def test_login_invia_client_id_e_device_info(aioclient, session) -> None:
+    aioclient.post(
+        LOGIN,
+        json={"statusCode": 100, "body": {"access_token": "AT", "refresh_token": "RT"}},
+    )
     auth = CanvasAuth(session, "eu")
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{ACCOUNT}/account/api/v1/user/login",
-            payload={"statusCode": 100, "body": {"access_token": "AT", "refresh_token": "RT"}},
-        )
-        await auth.login("mario@example.test", "segreta")
-        request = next(iter(mocked.requests.values()))[0]
 
-    body = request.kwargs["json"]
+    await auth.login("mario@example.test", "segreta")
+    _method, _url, body, _headers = aioclient.mock_calls[0]
+
     assert body["clientId"] == "pg6fbtxbi7q3o2n4zba852d5lh"
     assert body["grantType"] == "password"
     assert body["username"] == "mario@example.test"
@@ -678,31 +738,28 @@ async def test_login_invia_client_id_e_device_info(session) -> None:
     }
 
 
-async def test_login_con_credenziali_errate_solleva_auth_error(session) -> None:
+async def test_login_con_credenziali_errate_solleva_auth_error(aioclient, session) -> None:
+    aioclient.post(LOGIN, json={"statusCode": 160, "message": "wrong password"})
     auth = CanvasAuth(session, "eu")
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{ACCOUNT}/account/api/v1/user/login",
-            payload={"statusCode": 160, "message": "wrong password"},
-        )
-        with pytest.raises(SwitchBotCanvasAuthError):
-            await auth.login("mario@example.test", "sbagliata")
+
+    with pytest.raises(SwitchBotCanvasAuthError):
+        await auth.login("mario@example.test", "sbagliata")
 
 
-async def test_refresh_invia_user_id_e_refresh_token(session) -> None:
+async def test_refresh_invia_user_id_e_refresh_token(aioclient, session) -> None:
+    aioclient.post(
+        REFRESH,
+        json={
+            "statusCode": 100,
+            "body": {"access_token": "AT2", "token_type": "Bearer", "expires_in": 3600},
+        },
+    )
     auth = CanvasAuth(session, "eu")
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{ACCOUNT}/account/api/v1/user/token/refresh",
-            payload={
-                "statusCode": 100,
-                "body": {"access_token": "AT2", "token_type": "Bearer", "expires_in": 3600},
-            },
-        )
-        tokens = await auth.refresh("user-1", "RT")
-        request = next(iter(mocked.requests.values()))[0]
 
-    assert request.kwargs["json"] == {
+    tokens = await auth.refresh("user-1", "RT")
+    _method, _url, body, _headers = aioclient.mock_calls[0]
+
+    assert body == {
         "userId": "user-1",
         "refreshToken": "RT",
         "clientId": "pg6fbtxbi7q3o2n4zba852d5lh",
@@ -711,30 +768,37 @@ async def test_refresh_invia_user_id_e_refresh_token(session) -> None:
     assert tokens.refresh_token == "RT", "il refresh token va conservato, la risposta non lo ripete"
 
 
-async def test_user_info_restituisce_id_ed_email(session) -> None:
+async def test_user_info_restituisce_id_ed_email(aioclient, session) -> None:
+    aioclient.post(
+        USERINFO,
+        json={"statusCode": 100, "body": {"userID": "user-1", "email": "m@example.test"}},
+    )
     auth = CanvasAuth(session, "eu")
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{ACCOUNT}/account/api/v1/user/userinfo",
-            payload={"statusCode": 100, "body": {"userID": "user-1", "email": "m@example.test"}},
-        )
-        info = await auth.user_info("AT")
+
+    info = await auth.user_info("AT")
 
     assert info.user_id == "user-1"
     assert info.email == "m@example.test"
 
 
-async def test_user_info_invia_header_senza_bearer_in_eu(session) -> None:
+async def test_user_info_invia_header_senza_bearer_in_eu(aioclient, session) -> None:
+    aioclient.post(USERINFO, json={"statusCode": 100, "body": {"userID": "u", "email": "e"}})
     auth = CanvasAuth(session, "eu")
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{ACCOUNT}/account/api/v1/user/userinfo",
-            payload={"statusCode": 100, "body": {"userID": "u", "email": "e"}},
-        )
-        await auth.user_info("AT")
-        request = next(iter(mocked.requests.values()))[0]
 
-    assert request.kwargs["headers"]["Authorization"] == "AT"
+    await auth.user_info("AT")
+    _method, _url, _body, headers = aioclient.mock_calls[0]
+
+    assert headers["Authorization"] == "AT"
+
+
+async def test_user_info_invia_header_con_bearer_fuori_dalla_ue(aioclient, session) -> None:
+    aioclient.post(USERINFO, json={"statusCode": 100, "body": {"userID": "u", "email": "e"}})
+    auth = CanvasAuth(session, "us")
+
+    await auth.user_info("AT")
+    _method, _url, _body, headers = aioclient.mock_calls[0]
+
+    assert headers["Authorization"] == "Bearer AT"
 ```
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
@@ -840,8 +904,8 @@ class CanvasAuth:
 
 - [ ] **Step 4: Eseguire i test e verificare che passino**
 
-Run: `pytest tests/api/test_auth.py -v`
-Expected: PASS, 6 test
+Run: `.venv/bin/pytest tests/api/test_auth.py -v`
+Expected: PASS, 7 test
 
 - [ ] **Step 5: Commit**
 
@@ -877,9 +941,10 @@ File `tests/api/test_client.py`:
 """Test dei modelli e della facciata del client."""
 from __future__ import annotations
 
-import aiohttp
+import asyncio
+
 import pytest
-from aioresponses import aioresponses
+from pytest_homeassistant_custom_component.test_util.aiohttp import mock_aiohttp_client
 
 from custom_components.switchbot_eink.api.auth import Tokens
 from custom_components.switchbot_eink.api.client import SwitchBotCanvasClient
@@ -890,13 +955,21 @@ from custom_components.switchbot_eink.api.models import (
 )
 
 BASE = "https://wonderlabs.eu.api.switchbot.net/productbiz"
+BASE_US = "https://wonderlabs.us.api.switchbot.net/productbiz"
 TOKENS = Tokens(access_token="AT", refresh_token="RT", token_type="Bearer")
 
 
 @pytest.fixture
-async def session():
-    async with aiohttp.ClientSession() as sess:
-        yield sess
+async def aioclient():
+    with mock_aiohttp_client() as mocker:
+        yield mocker
+
+
+@pytest.fixture
+async def session(aioclient):
+    sess = aioclient.create_session(asyncio.get_running_loop())
+    yield sess
+    await sess.close()
 
 
 @pytest.fixture
@@ -918,28 +991,32 @@ def test_slot_sconosciuto_ha_sort_order_zero() -> None:
     assert page_slot_to_sort_order("unassigned") == 0
 
 
-async def test_list_eink_devices_filtra_per_tipo_e_condivisione(client) -> None:
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{BASE}/device/v1/manage/getDeviceList",
-            payload={
-                "resultCode": 100,
-                "data": [
-                    {"deviceID": "A", "deviceName": "Pannello", "deviceType": "W1070000",
-                     "isShare": False},
-                    {"deviceID": "B", "deviceName": "Condiviso", "deviceType": "W1070000",
-                     "isShare": True},
-                    {"deviceID": "C", "deviceName": "Meter", "deviceType": "WoMeter",
-                     "isShare": False},
-                ],
-            },
-        )
-        devices = await client.list_eink_devices()
+async def test_list_eink_devices_filtra_per_tipo_e_condivisione(aioclient, client) -> None:
+    aioclient.post(
+        f"{BASE}/device/v1/manage/getDeviceList",
+        json={
+            "resultCode": 100,
+            "data": [
+                {"deviceID": "A", "deviceName": "Pannello", "deviceType": "W1070000",
+                 "isShare": False},
+                {"deviceID": "B", "deviceName": "Condiviso", "deviceType": "W1070000",
+                 "isShare": True},
+                {"deviceID": "C", "deviceName": "Meter", "deviceType": "WoMeter",
+                 "isShare": False},
+            ],
+        },
+    )
+
+    devices = await client.list_eink_devices()
 
     assert [d.device_id for d in devices] == ["A"]
 
 
-async def test_create_template_invia_sort_order_e_restituisce_id(client) -> None:
+async def test_create_template_invia_sort_order_e_restituisce_id(aioclient, client) -> None:
+    aioclient.post(
+        f"{BASE}/web/v1/user/templates/create",
+        json={"resultCode": 100, "data": {"templateId": 77}},
+    )
     template = Template(
         template_id=None,
         name="Casa",
@@ -947,15 +1024,10 @@ async def test_create_template_invia_sort_order_e_restituisce_id(client) -> None
         device_id="A",
         components=[{"id": "1", "type": "text", "name": "t", "css": "{}", "extra": "{}"}],
     )
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{BASE}/web/v1/user/templates/create",
-            payload={"resultCode": 100, "data": {"templateId": 77}},
-        )
-        template_id = await client.create_template(template)
-        request = next(iter(mocked.requests.values()))[0]
 
-    body = request.kwargs["json"]
+    template_id = await client.create_template(template)
+    _method, _url, body, _headers = aioclient.mock_calls[0]
+
     assert body["sortOrder"] == 1
     assert body["templateType"] == 0
     assert body["enabled"] is True
@@ -964,70 +1036,61 @@ async def test_create_template_invia_sort_order_e_restituisce_id(client) -> None
     assert template_id == 77
 
 
-async def test_update_template_include_sort_order_per_le_pagine_custom(client) -> None:
+async def test_update_template_include_sort_order_per_le_pagine_custom(
+    aioclient, client
+) -> None:
+    aioclient.post(f"{BASE}/web/v1/user/templates/update", json={"resultCode": 100, "data": None})
     template = Template(
         template_id=77, name="Casa", page_slot="custom2", device_id="A", components=[]
     )
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{BASE}/web/v1/user/templates/update", payload={"resultCode": 100, "data": None}
-        )
-        await client.update_template(template)
-        request = next(iter(mocked.requests.values()))[0]
 
-    body = request.kwargs["json"]
+    await client.update_template(template)
+    _method, _url, body, _headers = aioclient.mock_calls[0]
+
     assert body["templateId"] == 77
     assert body["sortOrder"] == 2
 
 
-async def test_update_template_omette_sort_order_per_la_home(client) -> None:
+async def test_update_template_omette_sort_order_per_la_home(aioclient, client) -> None:
+    aioclient.post(f"{BASE}/web/v1/user/templates/update", json={"resultCode": 100, "data": None})
     template = Template(
         template_id=77, name="Home", page_slot="home", device_id="A", components=[]
     )
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{BASE}/web/v1/user/templates/update", payload={"resultCode": 100, "data": None}
-        )
-        await client.update_template(template)
-        request = next(iter(mocked.requests.values()))[0]
 
-    assert "sortOrder" not in request.kwargs["json"]
+    await client.update_template(template)
+    _method, _url, body, _headers = aioclient.mock_calls[0]
+
+    assert "sortOrder" not in body
 
 
-async def test_release_invia_solo_il_device_id(client) -> None:
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{BASE}/web/v1/user/templates/release", payload={"resultCode": 100, "data": None}
-        )
-        await client.release("A")
-        request = next(iter(mocked.requests.values()))[0]
+async def test_release_invia_solo_il_device_id(aioclient, client) -> None:
+    aioclient.post(f"{BASE}/web/v1/user/templates/release", json={"resultCode": 100, "data": None})
 
-    assert request.kwargs["json"] == {"deviceID": "A"}
+    await client.release("A")
+    _method, _url, body, _headers = aioclient.mock_calls[0]
+
+    assert body == {"deviceID": "A"}
 
 
-async def test_header_authorization_senza_bearer_in_eu(client) -> None:
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{BASE}/web/v1/user/templates/release", payload={"resultCode": 100, "data": None}
-        )
-        await client.release("A")
-        request = next(iter(mocked.requests.values()))[0]
+async def test_header_authorization_senza_bearer_in_eu(aioclient, client) -> None:
+    aioclient.post(f"{BASE}/web/v1/user/templates/release", json={"resultCode": 100, "data": None})
 
-    assert request.kwargs["headers"]["Authorization"] == "AT"
+    await client.release("A")
+    _method, _url, _body, headers = aioclient.mock_calls[0]
+
+    assert headers["Authorization"] == "AT"
 
 
-async def test_header_authorization_con_bearer_in_us(session) -> None:
+async def test_header_authorization_con_bearer_in_us(aioclient, session) -> None:
+    aioclient.post(
+        f"{BASE_US}/web/v1/user/templates/release", json={"resultCode": 100, "data": None}
+    )
     client_us = SwitchBotCanvasClient(session, "us", TOKENS, user_id="user-1")
-    base_us = "https://wonderlabs.us.api.switchbot.net/productbiz"
-    with aioresponses() as mocked:
-        mocked.post(
-            f"{base_us}/web/v1/user/templates/release",
-            payload={"resultCode": 100, "data": None},
-        )
-        await client_us.release("A")
-        request = next(iter(mocked.requests.values()))[0]
 
-    assert request.kwargs["headers"]["Authorization"] == "Bearer AT"
+    await client_us.release("A")
+    _method, _url, _body, headers = aioclient.mock_calls[0]
+
+    assert headers["Authorization"] == "Bearer AT"
 ```
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
@@ -1279,8 +1342,8 @@ __all__ = [
 
 - [ ] **Step 6: Eseguire i test e verificare che passino**
 
-Run: `pytest tests/api -v`
-Expected: PASS, 37 test in totale
+Run: `.venv/bin/pytest tests/api -v`
+Expected: PASS, 39 test in totale
 
 - [ ] **Step 7: Commit**
 
