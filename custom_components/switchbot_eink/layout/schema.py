@@ -13,11 +13,26 @@ PAGE_SLOTS: tuple[str, ...] = ("custom1", "custom2", "custom3", "custom4")
 DEFAULT_PAGE_NAME = "Home Assistant"
 
 
+def _as_int(value: Any, what: str) -> int:
+    """Accetta solo interi veri.
+
+    `int(1.5)` darebbe 1 senza lamentarsi: in uno YAML scritto a mano un valore
+    frazionario è un errore di battitura, non una richiesta di arrotondamento.
+    I booleani in Python sono interi, quindi vanno esclusi a parte.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise vol.Invalid(f"{what} deve essere un intero, trovato {value!r}")
+    return value
+
+
 def _grid_tuple(value: Any) -> list[int]:
     """Valida [colonna, riga, larghezza, altezza] contro i limiti della griglia."""
     if not isinstance(value, (list, tuple)) or len(value) != 4:
         raise vol.Invalid("grid deve essere [colonna, riga, larghezza, altezza]")
-    col, row, span_w, span_h = (int(item) for item in value)
+    col, row, span_w, span_h = (
+        _as_int(item, nome)
+        for item, nome in zip(value, ("colonna", "riga", "larghezza", "altezza"), strict=True)
+    )
     if not 0 <= col < GRID_COLS:
         raise vol.Invalid(f"colonna {col} fuori dalle {GRID_COLS} colonne")
     if not 0 <= row < GRID_ROWS:
@@ -33,7 +48,10 @@ def _position_tuple(value: Any) -> list[int]:
     """Valida [x, y, w, h] in pixel."""
     if not isinstance(value, (list, tuple)) or len(value) != 4:
         raise vol.Invalid("position deve essere [x, y, larghezza, altezza] in pixel")
-    return [int(item) for item in value]
+    return [
+        _as_int(item, nome)
+        for item, nome in zip(value, ("x", "y", "larghezza", "altezza"), strict=True)
+    ]
 
 
 STYLE_SCHEMA = vol.Schema(
@@ -64,8 +82,11 @@ CARD_SCHEMA = vol.Schema(
         vol.Optional("style", default=dict): STYLE_SCHEMA,
         vol.Optional("z", default=1): int,
         # metric
-        vol.Optional("widget", default=DEFAULT_METRIC_TYPE): vol.In(METRIC_TYPES),
+        vol.Optional("widget"): vol.In(METRIC_TYPES),
         vol.Optional("entity"): str,
+        # Volutamente non validata contro KNOWN_ICONS: quella lista contiene solo
+        # gli alias estratti dal renderer, il registro vero e' piu' ampio e non
+        # enumerabile. Un nome sconosciuto ricade su un'icona di default.
         vol.Optional("icon"): str,
         vol.Optional("label"): str,
         vol.Optional("value"): str,
@@ -109,4 +130,6 @@ def validate_page(raw: dict[str, Any]) -> dict[str, Any]:
     page: dict[str, Any] = PAGE_SCHEMA(raw)
     for index, card in enumerate(page["cards"]):
         _check_card_invariants(card, index)
+        if card["type"] == "metric":
+            card.setdefault("widget", DEFAULT_METRIC_TYPE)
     return page

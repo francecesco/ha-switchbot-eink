@@ -145,3 +145,49 @@ def test_widget_metric_esplicito_accettato() -> None:
     )
 
     assert page["cards"][0]["widget"] == "pressure"
+
+
+def test_grid_con_valore_frazionario_rifiutata() -> None:
+    with pytest.raises(vol.Invalid, match="intero"):
+        validate_page(
+            {"page": "custom1", "cards": [{"type": "text", "text": "x", "grid": [0, 0, 1.5, 1]}]}
+        )
+
+
+def test_grid_con_booleano_rifiutata() -> None:
+    with pytest.raises(vol.Invalid, match="intero"):
+        validate_page(
+            {"page": "custom1", "cards": [{"type": "text", "text": "x", "grid": [0, 0, True, 1]}]}
+        )
+
+
+def test_position_con_valore_frazionario_rifiutata() -> None:
+    with pytest.raises(vol.Invalid, match="intero"):
+        validate_page(
+            {
+                "page": "custom1",
+                "cards": [{"type": "text", "text": "x", "position": [0, 0, 100.5, 40]}],
+            }
+        )
+
+
+def test_il_widget_predefinito_si_applica_solo_alle_metric() -> None:
+    page = validate_page(
+        {
+            "page": "custom1",
+            "cards": [
+                {"type": "metric", "value": "1", "label": "L", "grid": [0, 0, 3, 1]},
+                {"type": "divider", "grid": [0, 1, 12, 1]},
+            ],
+        }
+    )
+
+    assert page["cards"][0]["widget"] == "switchbotMeter"
+    assert "widget" not in page["cards"][1], "un divider non ha un widget metric"
+
+
+def test_una_pagina_senza_card_e_valida() -> None:
+    """Una dashboard vuota e' un caso limite legittimo, non un errore."""
+    page = validate_page({"page": "custom1", "cards": []})
+
+    assert page["cards"] == []
