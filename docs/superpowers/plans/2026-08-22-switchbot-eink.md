@@ -1813,7 +1813,12 @@ from __future__ import annotations
 
 import pytest
 
-from custom_components.switchbot_eink.layout.const import USABLE_HEIGHT, USABLE_WIDTH
+from custom_components.switchbot_eink.layout.const import (
+    GRID_COLS,
+    GRID_ROWS,
+    USABLE_HEIGHT,
+    USABLE_WIDTH,
+)
 from custom_components.switchbot_eink.layout.grid import (
     Rect,
     grid_to_rect,
@@ -1887,6 +1892,51 @@ def test_rect_adiacenti_non_si_sovrappongono() -> None:
 
 def test_rect_incrociati_si_sovrappongono() -> None:
     assert rects_overlap(Rect(0, 0, 100, 50), Rect(50, 20, 100, 50)) is True
+
+
+def test_ogni_coppia_di_colonne_adiacenti_dista_una_gutter() -> None:
+    for col in range(GRID_COLS - 1):
+        sinistra = grid_to_rect(col, 0, 1, 1)
+        destra = grid_to_rect(col + 1, 0, 1, 1)
+
+        assert destra.x - (sinistra.x + sinistra.w) == 8, f"fra colonna {col} e {col + 1}"
+
+
+def test_ogni_coppia_di_righe_adiacenti_dista_una_gutter() -> None:
+    for row in range(GRID_ROWS - 1):
+        sopra = grid_to_rect(0, row, 1, 1)
+        sotto = grid_to_rect(0, row + 1, 1, 1)
+
+        assert sotto.y - (sopra.y + sopra.h) == 8, f"fra riga {row} e {row + 1}"
+
+
+def test_nessuna_combinazione_esce_dall_area_utile() -> None:
+    for col in range(GRID_COLS):
+        for span_w in range(1, GRID_COLS - col + 1):
+            for row in range(GRID_ROWS):
+                for span_h in range(1, GRID_ROWS - row + 1):
+                    rect = grid_to_rect(col, row, span_w, span_h)
+
+                    assert rect_fits(rect), f"{col},{row},{span_w},{span_h} produce {rect}"
+
+
+def test_due_celle_distinte_non_si_sovrappongono_mai() -> None:
+    celle = [grid_to_rect(col, row, 1, 1) for col in range(GRID_COLS) for row in range(GRID_ROWS)]
+
+    for indice, una in enumerate(celle):
+        for altra in celle[indice + 1 :]:
+            assert not rects_overlap(una, altra), f"{una} e {altra}"
+
+
+def test_uno_span_copre_esattamente_le_celle_che_attraversa() -> None:
+    for col in range(GRID_COLS):
+        for span_w in range(1, GRID_COLS - col + 1):
+            span = grid_to_rect(col, 0, span_w, 1)
+            prima = grid_to_rect(col, 0, 1, 1)
+            ultima = grid_to_rect(col + span_w - 1, 0, 1, 1)
+
+            assert span.x == prima.x, f"span da {col} largo {span_w}"
+            assert span.x + span.w == ultima.x + ultima.w, f"span da {col} largo {span_w}"
 ```
 
 - [ ] **Step 2: Eseguire il test e verificare che fallisca**
@@ -2033,13 +2083,30 @@ class Rect:
     h: int
 
 
+def _track_edges(total: int, count: int, gutter: int) -> tuple[list[int], list[int]]:
+    """Bordi di inizio e fine di ogni traccia, già arrotondati.
+
+    Arrotondare i bordi una volta sola, invece di arrotondare posizione e
+    dimensione separatamente, evita che i due errori si sommino: è ciò che
+    garantisce che il distacco fra due celle adiacenti sia sempre esattamente
+    la gutter, e non la gutter più o meno un pixel.
+    """
+    cell = (total - gutter * (count - 1)) / count
+    pitch = cell + gutter
+    starts = [round(index * pitch) for index in range(count)]
+    ends = [round(index * pitch + cell) for index in range(count)]
+    return starts, ends
+
+
 def grid_to_rect(
     col: int, row: int, span_w: int, span_h: int, gutter: int = DEFAULT_GUTTER
 ) -> Rect:
     """Converte una posizione di griglia in pixel.
 
-    Le celle hanno dimensione frazionaria; arrotondiamo solo alla fine così che
-    span adiacenti restino allineati e uno span pieno copra esattamente l'area.
+    Le celle hanno dimensione frazionaria. Arrotondiamo i bordi delle tracce
+    una volta sola e ricaviamo la larghezza come differenza fra bordi già
+    arrotondati, così il distacco fra celle adiacenti è sempre esattamente la
+    gutter e uno span pieno copre esattamente l'area utile.
     """
     if span_w < 1 or span_h < 1:
         raise ValueError("span_w e span_h devono valere almeno 1")
@@ -2052,14 +2119,17 @@ def grid_to_rect(
     if row + span_h > GRID_ROWS:
         raise ValueError(f"altezza {span_h} da riga {row} esce dalla griglia")
 
-    cell_w = (USABLE_WIDTH - gutter * (GRID_COLS - 1)) / GRID_COLS
-    cell_h = (USABLE_HEIGHT - gutter * (GRID_ROWS - 1)) / GRID_ROWS
+    col_starts, col_ends = _track_edges(USABLE_WIDTH, GRID_COLS, gutter)
+    row_starts, row_ends = _track_edges(USABLE_HEIGHT, GRID_ROWS, gutter)
+
+    x = col_starts[col]
+    y = row_starts[row]
 
     return Rect(
-        x=round(col * (cell_w + gutter)),
-        y=round(row * (cell_h + gutter)),
-        w=round(span_w * cell_w + (span_w - 1) * gutter),
-        h=round(span_h * cell_h + (span_h - 1) * gutter),
+        x=x,
+        y=y,
+        w=col_ends[col + span_w - 1] - x,
+        h=row_ends[row + span_h - 1] - y,
     )
 
 
@@ -2084,8 +2154,8 @@ def rects_overlap(a: Rect, b: Rect) -> bool:
 
 - [ ] **Step 5: Eseguire i test e verificare che passino**
 
-Run: `pytest tests/layout/test_grid.py -v`
-Expected: PASS, 13 test
+Run: `.venv/bin/pytest tests/layout/test_grid.py -v`
+Expected: PASS, 18 test
 
 - [ ] **Step 6: Commit**
 
@@ -3131,8 +3201,8 @@ __all__ = [
 
 - [ ] **Step 5: Eseguire i test e verificare che passino**
 
-Run: `pytest tests/layout -v`
-Expected: PASS, 56 test in totale
+Run: `.venv/bin/pytest tests/layout -v`
+Expected: PASS, 61 test in totale
 
 - [ ] **Step 6: Commit**
 
