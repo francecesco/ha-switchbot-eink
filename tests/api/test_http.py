@@ -16,19 +16,10 @@ from custom_components.switchbot_eink.api.errors import (
     SwitchBotCanvasAuthError,
 )
 from custom_components.switchbot_eink.api.http import CanvasHttp
+from tests.api.helpers import response_sequence
 
 BASE = "https://example.test/productbiz"
 PING = f"{BASE}/ping"
-
-
-def response_sequence(*responses):
-    """Restituisce risposte diverse a chiamate successive sullo stesso URL."""
-    iterator = iter(responses)
-
-    async def _side_effect(method, url, data):
-        return next(iterator)
-
-    return _side_effect
 
 
 def json_response(payload, status=200):
