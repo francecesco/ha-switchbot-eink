@@ -38,9 +38,11 @@ Account service: `https://account.api.switchbot.net`.
 Tutte le chiamate sono `POST` con `content-type: application/json` e header
 `Authorization: <access_token>`.
 
-**Attenzione alla regione `eu`.** Il client web ha un comportamento specifico: quando la
-regione è `eu`, il prefisso `Bearer ` viene **rimosso** dall'header `Authorization`, che
-diventa il token nudo. Sulle altre regioni il valore viene passato così com'è. Essendo
+Il client web costruisce il valore dell'header come `"{token_type} {access_token}"`, con
+`token_type` che vale `Bearer` quando assente.
+
+**Attenzione alla regione `eu`.** Su quella regione, e solo su quella, il prefisso
+`Bearer ` viene poi **rimosso**, e l'header diventa il token nudo. Essendo
 l'installazione italiana su `eu`, è il caso da implementare per primo, ed è un candidato
 naturale a far fallire il login in modo poco diagnosticabile se lo si ignora.
 
@@ -120,17 +122,31 @@ Mappatura slot → `sortOrder`: `home` → 1 (con `templateType: 1`), `custom1`�
 | Safe area | `safeTop: 64`, `safeBottom: 44` |
 | **Area utilizzabile** | **800 × 372** |
 
+Resta da determinare sul campo se l'origine `y = 0` di un componente coincida con il
+bordo fisico dello schermo o con il bordo inferiore della status bar. Il renderer
+dell'editor calcola l'area utile come `height - safeTop - safeBottom`, il che suggerisce
+la seconda, ma l'ambiguità va sciolta con una misura prima di fissare la griglia.
+
 ### Formato di un componente
 
+**`css` ed `extra` sono stringhe JSON, non oggetti.** Il serializzatore del client web
+chiude entrambi con `JSON.stringify` prima di inviarli, e il deserializzatore li riapre
+con `JSON.parse`. Inviarli come oggetti annidati è l'errore più probabile in fase di
+implementazione.
+
 ```json
-{ "id": "<string>", "type": "<widget type>", "name": "<string>",
-  "css":   { "x":0, "y":0, "w":200, "h":80, "z":1, "<style>": ... },
-  "extra": { "dataMode":"text", "source":"custom", "refresh":"1h",
-             "content": { ... }, "locked": false, "visible": true } }
+{ "id": "17", "type": "text", "name": "Stato lavatrice",
+  "css":   "{\"x\":0,\"y\":0,\"w\":200,\"h\":80,\"z\":1,\"fontSize\":24}",
+  "extra": "{\"dataMode\":\"text\",\"source\":\"custom\",\"refresh\":\"1h\",\"content\":{\"text\":\"...\"},\"locked\":false,\"visible\":true}" }
 ```
 
-`css` fonde geometria e stile in un oggetto piatto. `extra` contiene il blocco `data`
-più `content`, `locked`, `visible`.
+Una volta decodificato, `css` fonde geometria e stile in un oggetto piatto, mentre
+`extra` contiene il blocco `data` più `content`, `locked`, `visible`.
+
+L'**`id` deve essere una stringa che rappresenta un intero positivo**, validata contro
+`/^[1-9]\d*$/` e con valore massimo 2147483647; deve essere unico all'interno del
+template. Qualsiasi altro valore — un UUID, per esempio — viene serializzato come `"0"`,
+il che fa collidere tutti i componenti fra loro.
 
 Chiavi di stile ammesse: `backgroundColor`, `textColor`, `borderColor` (solo
 `black` | `white` | `gray` | `transparent`), `borderWidth`, `radius`, `padding`,
