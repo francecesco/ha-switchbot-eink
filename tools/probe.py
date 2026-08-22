@@ -30,6 +30,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from custom_components.switchbot_eink.api.auth import CanvasAuth  # noqa: E402
 from custom_components.switchbot_eink.api.client import SwitchBotCanvasClient  # noqa: E402
+from custom_components.switchbot_eink.api.envelope import normalize_region  # noqa: E402
+from custom_components.switchbot_eink.api.errors import SwitchBotCanvasError  # noqa: E402
 from custom_components.switchbot_eink.api.models import Template  # noqa: E402
 
 
@@ -151,10 +153,32 @@ def build_metric_components() -> list[dict[str, str]]:
     ]
 
 
+def read_credentials() -> tuple[str, str, str]:
+    """Legge le credenziali dall'ambiente, spiegando cosa manca invece di esplodere."""
+    mancanti = [
+        nome for nome in ("SWITCHBOT_USER", "SWITCHBOT_PASS") if not os.environ.get(nome)
+    ]
+    if mancanti:
+        raise SystemExit(
+            "Variabili d'ambiente mancanti: "
+            + ", ".join(mancanti)
+            + "\nImpostale prima di eseguire la sonda:\n"
+            "  export SWITCHBOT_USER=tua@email\n"
+            "  export SWITCHBOT_PASS='la tua password'\n"
+            "  export SWITCHBOT_REGION=eu"
+        )
+
+    grezza = os.environ.get("SWITCHBOT_REGION", "eu")
+    try:
+        regione = normalize_region(grezza)
+    except ValueError as err:
+        raise SystemExit(f"SWITCHBOT_REGION non valida: {err}") from err
+
+    return os.environ["SWITCHBOT_USER"], os.environ["SWITCHBOT_PASS"], regione
+
+
 async def _connect(session: aiohttp.ClientSession) -> tuple[SwitchBotCanvasClient, str]:
-    username = os.environ["SWITCHBOT_USER"]
-    password = os.environ["SWITCHBOT_PASS"]
-    region = os.environ.get("SWITCHBOT_REGION", "eu")
+    username, password, region = read_credentials()
 
     auth = CanvasAuth(session, region)
     tokens = await auth.login(username, password)
@@ -177,6 +201,12 @@ async def _publish(
 ) -> None:
     """Riusa il template già presente sullo slot, altrimenti ne crea uno."""
     existing = [t for t in await client.list_templates(device_id) if t.page_slot == slot]
+    if len(existing) > 1:
+        print(
+            f"Attenzione: sullo slot {slot} ci sono {len(existing)} template. "
+            f"Aggiorno il primo (id {existing[0].template_id}); gli altri restano inutilizzati "
+            "e potrebbero confondere la misura."
+        )
     template = Template(
         template_id=existing[0].template_id if existing else None,
         name=name,
@@ -200,36 +230,46 @@ async def main() -> None:
     parser.add_argument(
         "command", choices=["devices", "clock", "origin", "metric", "templates"]
     )
-    parser.add_argument("--slot", default="custom1", help="custom1..custom4")
+    parser.add_argument(
+        "--slot",
+        default="custom1",
+        choices=("custom1", "custom2", "custom3", "custom4"),
+        help="pagina custom su cui pubblicare",
+    )
     args = parser.parse_args()
 
-    async with aiohttp.ClientSession() as session:
-        client, device_id = await _connect(session)
+    try:
+        async with aiohttp.ClientSession() as session:
+            client, device_id = await _connect(session)
 
-        if args.command == "devices":
-            for device in await client.list_devices():
-                print(f"  {device.device_id}  {device.device_type:<12} {device.device_name}")
+            if args.command == "devices":
+                for device in await client.list_devices():
+                    print(
+                        f"  {device.device_id}  {device.device_type:<12} {device.device_name}"
+                    )
 
-        elif args.command == "templates":
-            for summary in await client.list_templates(device_id):
-                print(f"  {summary.template_id}  {summary.page_slot:<12} {summary.name}")
+            elif args.command == "templates":
+                for summary in await client.list_templates(device_id):
+                    print(f"  {summary.template_id}  {summary.page_slot:<12} {summary.name}")
 
-        elif args.command == "clock":
-            now = datetime.now().strftime("%H:%M:%S")
-            await _publish(
-                client, device_id, args.slot, "Sonda orologio", [build_clock_component(now)]
-            )
-            print(f"Orario pubblicato: {now}")
+            elif args.command == "clock":
+                now = datetime.now().strftime("%H:%M:%S")
+                await _publish(
+                    client, device_id, args.slot, "Sonda orologio", [build_clock_component(now)]
+                )
+                print(f"Orario pubblicato: {now}")
 
-        elif args.command == "origin":
-            await _publish(
-                client, device_id, args.slot, "Sonda origine", build_origin_components()
-            )
+            elif args.command == "origin":
+                await _publish(
+                    client, device_id, args.slot, "Sonda origine", build_origin_components()
+                )
 
-        elif args.command == "metric":
-            await _publish(
-                client, device_id, args.slot, "Sonda metric", build_metric_components()
-            )
+            elif args.command == "metric":
+                await _publish(
+                    client, device_id, args.slot, "Sonda metric", build_metric_components()
+                )
+    except SwitchBotCanvasError as err:
+        raise SystemExit(f"Errore nel dialogo con SwitchBot: {err}") from err
 
 
 if __name__ == "__main__":

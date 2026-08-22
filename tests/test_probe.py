@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 
-from tools.probe import build_clock_component
+import pytest
+
+from tools.probe import build_clock_component, read_credentials
 
 
 def test_build_clock_component_produce_css_ed_extra_come_stringhe() -> None:
@@ -34,3 +36,34 @@ def test_build_clock_component_contiene_il_testo() -> None:
     assert extra["content"]["text"] == "12:34:56"
     assert extra["source"] == "custom"
     assert extra["dataMode"] == "text"
+
+
+def test_credenziali_mancanti_spiegano_cosa_impostare(monkeypatch) -> None:
+    monkeypatch.delenv("SWITCHBOT_USER", raising=False)
+    monkeypatch.setenv("SWITCHBOT_PASS", "segreta")
+
+    with pytest.raises(SystemExit) as errore:
+        read_credentials()
+
+    assert "SWITCHBOT_USER" in str(errore.value)
+
+
+def test_regione_non_valida_viene_rifiutata_subito(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCHBOT_USER", "mario@example.test")
+    monkeypatch.setenv("SWITCHBOT_PASS", "segreta")
+    monkeypatch.setenv("SWITCHBOT_REGION", "italia")
+
+    with pytest.raises(SystemExit) as errore:
+        read_credentials()
+
+    assert "SWITCHBOT_REGION" in str(errore.value)
+
+
+def test_la_regione_viene_normalizzata(monkeypatch) -> None:
+    monkeypatch.setenv("SWITCHBOT_USER", "mario@example.test")
+    monkeypatch.setenv("SWITCHBOT_PASS", "segreta")
+    monkeypatch.setenv("SWITCHBOT_REGION", " EU ")
+
+    _username, _password, regione = read_credentials()
+
+    assert regione == "eu"

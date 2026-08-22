@@ -6,6 +6,7 @@ import pytest
 from custom_components.switchbot_eink.api.envelope import (
     backend_base_url,
     build_auth_header,
+    normalize_region,
     unwrap_account,
     unwrap_backend,
 )
@@ -29,6 +30,19 @@ def test_auth_header_rimuove_bearer_nella_regione_eu() -> None:
 
 def test_auth_header_eu_e_insensibile_alle_maiuscole() -> None:
     assert build_auth_header("abc123", "bearer", "eu") == "abc123"
+
+
+def test_auth_header_rimuove_bearer_anche_con_regione_maiuscola() -> None:
+    assert build_auth_header("abc123", "Bearer", "EU") == "abc123"
+
+
+def test_normalize_region_accetta_maiuscole_e_spazi() -> None:
+    assert normalize_region(" EU ") == "eu"
+
+
+def test_normalize_region_rifiuta_una_regione_sconosciuta() -> None:
+    with pytest.raises(ValueError, match="sconosciuta"):
+        normalize_region("xx")
 
 
 def test_backend_base_url_interpola_la_regione() -> None:

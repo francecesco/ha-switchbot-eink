@@ -21,9 +21,23 @@ def build_auth_header(access_token: str, token_type: str | None, region: str) ->
     produce 401 senza spiegazione.
     """
     header = f"{token_type or 'Bearer'} {access_token}"
-    if region == "eu":
+    if region.strip().lower() == "eu":
         header = _BEARER_PREFIX.sub("", header)
     return header
+
+
+def normalize_region(value: str) -> str:
+    """Normalizza il nome di una regione, rifiutando quelle sconosciute.
+
+    `backend_base_url` ricade su `us` per qualunque valore non riconosciuto:
+    è una rete di sicurezza ragionevole per il codice, ma pessima all'ingresso,
+    dove un errore di battitura diventerebbe una richiesta al server sbagliato
+    con l'header sbagliato, e un 401 che non spiega niente.
+    """
+    normalized = value.strip().lower()
+    if normalized not in REGIONS:
+        raise ValueError(f"regione {value!r} sconosciuta: usa una fra {', '.join(REGIONS)}")
+    return normalized
 
 
 def backend_base_url(region: str) -> str:
