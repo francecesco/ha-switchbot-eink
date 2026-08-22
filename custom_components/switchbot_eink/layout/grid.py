@@ -22,13 +22,30 @@ class Rect:
     h: int
 
 
+def _track_edges(total: int, count: int, gutter: int) -> tuple[list[int], list[int]]:
+    """Bordi di inizio e fine di ogni traccia, già arrotondati.
+
+    Arrotondare i bordi una volta sola, invece di arrotondare posizione e
+    dimensione separatamente, evita che i due errori si sommino: è ciò che
+    garantisce che il distacco fra due celle adiacenti sia sempre esattamente
+    la gutter, e non la gutter più o meno un pixel.
+    """
+    cell = (total - gutter * (count - 1)) / count
+    pitch = cell + gutter
+    starts = [round(index * pitch) for index in range(count)]
+    ends = [round(index * pitch + cell) for index in range(count)]
+    return starts, ends
+
+
 def grid_to_rect(
     col: int, row: int, span_w: int, span_h: int, gutter: int = DEFAULT_GUTTER
 ) -> Rect:
     """Converte una posizione di griglia in pixel.
 
-    Le celle hanno dimensione frazionaria; arrotondiamo solo alla fine così che
-    span adiacenti restino allineati e uno span pieno copra esattamente l'area.
+    Le celle hanno dimensione frazionaria. Arrotondiamo i bordi delle tracce
+    una volta sola e ricaviamo la larghezza come differenza fra bordi già
+    arrotondati, così il distacco fra celle adiacenti è sempre esattamente la
+    gutter e uno span pieno copre esattamente l'area utile.
     """
     if span_w < 1 or span_h < 1:
         raise ValueError("span_w e span_h devono valere almeno 1")
@@ -41,14 +58,17 @@ def grid_to_rect(
     if row + span_h > GRID_ROWS:
         raise ValueError(f"altezza {span_h} da riga {row} esce dalla griglia")
 
-    cell_w = (USABLE_WIDTH - gutter * (GRID_COLS - 1)) / GRID_COLS
-    cell_h = (USABLE_HEIGHT - gutter * (GRID_ROWS - 1)) / GRID_ROWS
+    col_starts, col_ends = _track_edges(USABLE_WIDTH, GRID_COLS, gutter)
+    row_starts, row_ends = _track_edges(USABLE_HEIGHT, GRID_ROWS, gutter)
+
+    x = col_starts[col]
+    y = row_starts[row]
 
     return Rect(
-        x=round(col * (cell_w + gutter)),
-        y=round(row * (cell_h + gutter)),
-        w=round(span_w * cell_w + (span_w - 1) * gutter),
-        h=round(span_h * cell_h + (span_h - 1) * gutter),
+        x=x,
+        y=y,
+        w=col_ends[col + span_w - 1] - x,
+        h=row_ends[row + span_h - 1] - y,
     )
 
 
