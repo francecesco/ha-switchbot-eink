@@ -300,3 +300,35 @@ def test_i_componenti_compilati_stanno_a_destra_della_barra_laterale() -> None:
 
     css = json.loads(componenti[0]["css"])
     assert css["x"] >= USABLE_LEFT
+
+
+def test_una_card_con_template_disattivato_non_passa_dal_renderer() -> None:
+    """Regressione: senza questo, un evento intitolato con delle graffe verrebbe
+    eseguito invece che mostrato."""
+    pagina = validate_page(
+        {
+            "cards": [
+                {
+                    "type": "text",
+                    "grid": [0, 0, 6, 1],
+                    "text": "Riunione {{ 1 + 1 }}",
+                    "template": False,
+                }
+            ]
+        }
+    )
+
+    componenti = compile_page(pagina, lambda _testo: "RESO", risolvi)
+    extra = json.loads(componenti[0]["extra"])
+
+    assert extra["content"]["text"] == "Riunione {{ 1 + 1 }}"
+
+
+def test_una_card_normale_passa_ancora_dal_renderer() -> None:
+    pagina = validate_page(
+        {"cards": [{"type": "text", "grid": [0, 0, 6, 1], "text": "ciao"}]}
+    )
+
+    componenti = compile_page(pagina, lambda _testo: "RESO", risolvi)
+
+    assert json.loads(componenti[0]["extra"])["content"]["text"] == "RESO"

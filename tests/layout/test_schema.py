@@ -214,3 +214,25 @@ def test_uno_slot_inventato_viene_rifiutato() -> None:
         validate_page(
             {"page": "custom9", "cards": [{"type": "text", "grid": [0, 0, 2, 1], "text": "x"}]}
         )
+
+
+def test_il_rendering_dei_template_e_attivo_per_default() -> None:
+    page = validate_page(
+        {"cards": [{"type": "text", "grid": [0, 0, 2, 1], "text": "ciao"}]}
+    )
+
+    assert page["cards"][0]["template"] is True
+
+
+def test_il_rendering_dei_template_si_puo_disattivare() -> None:
+    """I titoli degli eventi di calendario sono dati esterni: eseguirli come
+    Jinja sarebbe un'iniezione di template."""
+    page = validate_page(
+        {
+            "cards": [
+                {"type": "text", "grid": [0, 0, 2, 1], "text": "x", "template": False}
+            ]
+        }
+    )
+
+    assert page["cards"][0]["template"] is False

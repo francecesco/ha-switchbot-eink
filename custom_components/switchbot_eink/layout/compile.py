@@ -55,23 +55,28 @@ def _content_for(
 ) -> dict[str, Any]:
     card_type = card["type"]
 
+    # Una card con `template: false` porta contenuti che non sono scritti
+    # dall'utente — i titoli degli eventi di calendario, per esempio — e che
+    # eseguire come Jinja sarebbe un'iniezione.
+    rendi = render if card.get("template", True) else (lambda testo: testo)
+
     if card_type in ("divider", "frame"):
         return {}
 
     if card_type == "image":
-        content = {"src": render(card["src"])}
+        content = {"src": rendi(card["src"])}
         if "alt" in card:
-            content["alt"] = render(card["alt"])
+            content["alt"] = rendi(card["alt"])
         return content
 
     if card_type == "text":
-        return {"text": render(card["text"])}
+        return {"text": rendi(card["text"])}
 
     # metric
     entity_value = resolve(card["entity"]) if "entity" in card else None
 
     if "value" in card:
-        value = render(card["value"])
+        value = rendi(card["value"])
     elif entity_value is not None:
         value = entity_value.state
     else:
@@ -80,12 +85,12 @@ def _content_for(
     content: dict[str, Any] = {"value": value}
 
     if "label" in card:
-        content["label"] = render(card["label"])
+        content["label"] = rendi(card["label"])
     if "icon" in card:
         content["icon"] = card["icon"]
 
     if "unit" in card:
-        content["unit"] = render(card["unit"])
+        content["unit"] = rendi(card["unit"])
     elif entity_value is not None and entity_value.unit:
         content["unit"] = entity_value.unit
 

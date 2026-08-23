@@ -84,6 +84,9 @@ CARD_SCHEMA = vol.Schema(
         vol.Optional("position"): _position_tuple,
         vol.Optional("style", default=dict): STYLE_SCHEMA,
         vol.Optional("z", default=1): int,
+        # Disattivabile per i contenuti che non sono scritti dall'utente: i
+        # titoli degli eventi di calendario non devono essere eseguiti come Jinja.
+        vol.Optional("template", default=True): bool,
         # metric
         vol.Optional("widget"): vol.In(METRIC_TYPES),
         vol.Optional("entity"): str,
