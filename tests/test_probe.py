@@ -29,12 +29,12 @@ def test_build_clock_component_ha_id_numerico_valido() -> None:
     assert component["id"].isdigit()
 
 
-def test_build_clock_component_posiziona_in_alto_a_sinistra() -> None:
+def test_build_clock_component_posiziona_in_cima_allarea_utile() -> None:
     css = json.loads(build_clock_component("12:34:56")["css"])
 
-    assert css["x"] == 0
+    assert css["x"] == 240
     assert css["y"] == 0
-    assert css["w"] == 800
+    assert css["w"] == 560
 
 
 def test_build_clock_component_contiene_il_testo() -> None:
@@ -139,3 +139,18 @@ def test_gli_identificativi_dei_componenti_sono_unici_e_numerici() -> None:
         identificativi = [c["id"] for c in componenti]
         assert all(i.isdigit() and int(i) > 0 for i in identificativi)
         assert len(set(identificativi)) == len(identificativi)
+
+
+def test_il_refresh_dellorologio_e_impostabile() -> None:
+    """E' l'ipotesi in prova sulla cadenza: il valore deve arrivare al backend
+    cosi' com'e', non essere riscritto a 1h."""
+    extra = json.loads(build_clock_component("12:00:00", refresh="5m")["extra"])
+
+    assert extra["refresh"] == "5m"
+
+
+def test_lorologio_sta_a_destra_della_barra_laterale() -> None:
+    css = json.loads(build_clock_component("12:00:00")["css"])
+
+    assert css["x"] == 240
+    assert css["x"] + css["w"] == 800

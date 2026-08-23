@@ -52,17 +52,24 @@ def _wire(
     }
 
 
-def build_clock_component(text: str, component_id: str = "1") -> dict[str, str]:
-    """Un testo grande in alto a sinistra, per leggere l'orario da lontano."""
+def build_clock_component(
+    text: str, component_id: str = "1", refresh: str = "1h"
+) -> dict[str, str]:
+    """Un testo grande in cima all'area utile, per leggere l'orario da lontano.
+
+    `refresh` e' l'ipotesi in prova: e' un campo che scriviamo noi e che il
+    backend ripropone al dispositivo. Se e' il pannello a leggerlo per decidere
+    ogni quanto tornare a scaricare, la cadenza non si misura, si imposta.
+    """
     return _wire(
         component_id,
         "text",
         "Sonda orologio",
-        {"x": 0, "y": 0, "w": 800, "h": 80, "z": 1, "fontSize": 56, "align": "center"},
+        {"x": 240, "y": 0, "w": 560, "h": 80, "z": 1, "fontSize": 56, "align": "center"},
         {
             "dataMode": "text",
             "source": "custom",
-            "refresh": "1h",
+            "refresh": refresh,
             "content": {"text": text},
             "locked": False,
             "visible": True,
@@ -398,6 +405,11 @@ async def main() -> None:
         choices=("home", "custom1", "custom2", "custom3", "custom4"),
         help="pagina su cui pubblicare (default: home)",
     )
+    parser.add_argument(
+        "--refresh",
+        default="1h",
+        help="valore del campo refresh del componente, es. 5m o 15m (default: 1h)",
+    )
     parser.add_argument("--x0", type=int, default=240)
     parser.add_argument("--y0", type=int, default=0)
     parser.add_argument("--x1", type=int, default=800)
@@ -449,7 +461,11 @@ async def main() -> None:
             elif args.command == "clock":
                 now = datetime.now().strftime("%H:%M:%S")
                 await _publish(
-                    client, device_id, args.slot, "Sonda orologio", [build_clock_component(now)]
+                    client,
+                    device_id,
+                    args.slot,
+                    "Sonda orologio",
+                    [build_clock_component(now, refresh=args.refresh)],
                 )
                 print(f"Orario pubblicato: {now}")
 
