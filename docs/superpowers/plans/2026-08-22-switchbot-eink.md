@@ -1902,7 +1902,7 @@ Creare `docs/superpowers/notes/2026-08-22-refresh-cadence.md` con le tre rispost
 
 **Gate di decisione:** se il pannello si aggiorna **solo** alla pressione del pulsante, fermarsi e riportarlo. L'approccio va riconsiderato prima di costruire l'integrazione, perché una dashboard che richiede una pressione fisica per aggiornarsi non risolve il problema di partenza.
 
-Altrimenti: annotare l'intervallo misurato, che diventa il default di `DEFAULT_UPDATE_INTERVAL` nel Task 11. Non ha senso ricompilare e pubblicare più spesso di quanto il pannello legga.
+**Esito, gia' misurato: il pannello si aggiorna ogni tre ore** (documentato dal supporto SwitchBot e coerente con la prova sul campo). Questo NON diventa il default di `DEFAULT_UPDATE_INTERVAL`: il pannello legge cio' che trova sul server al risveglio, quindi pubblicare piu' spesso di quanto legga riduce la staleness invece di sprecarla. Il default resta 900 secondi.
 
 - [ ] **Step 10: Commit**
 
@@ -4055,7 +4055,732 @@ git commit -m "feat(ha): aggiungi manifest, costanti e config flow"
 
 ---
 
-### Task 11: Coordinator e setup della entry
+### Task 11: Generatore dell'agenda
+
+**Files:**
+- Create: `custom_components/switchbot_eink/layout/agenda.py`
+- Modify: `custom_components/switchbot_eink/layout/schema.py` (campo `template`)
+- Modify: `custom_components/switchbot_eink/layout/compile.py` (rispetta `template: false`)
+- Modify: `custom_components/switchbot_eink/layout/__init__.py` (esporta il generatore)
+- Test: `tests/layout/test_agenda.py`
+- Test: `tests/layout/test_schema.py` (campo `template`)
+- Test: `tests/layout/test_compile.py` (rendering disattivabile)
+
+**Interfaces:**
+- Consumes: da Task 6 — `USABLE_WIDTH`; da Task 8 — `validate_page`; da Task 9 — `compile_page`.
+- Produces: la dataclass `Event(start, end, summary, all_day, calendar)`; `build_agenda_page(events, now, calendars=None, page_slot="home", name="Agenda") -> dict`; `calendar_markers(names) -> dict[str, str]`; `truncate(text, width_px, font_size) -> str`; le costanti `FINESTRA_GIORNI = 3`, `MAX_EVENTI_OGGI = 6`, `CHAR_WIDTH_RATIO = 0.52`.
+
+L'agenda non introduce un tipo di card nuovo: produce la stessa struttura che `validate_page` valida e che `compile_page` traduce. Resta nello strato puro — niente import di Home Assistant, niente import di `api/`.
+
+**Perché prima il campo `template`.** I titoli degli eventi sono dati che l'utente non controlla del tutto: arrivano da inviti, da calendari condivisi, da servizi esterni. Oggi ogni campo testuale di una card passa dal motore di template di Home Assistant, quindi un evento intitolato `Riunione {{ states('sensor.x') }}` verrebbe *eseguito*. Serve poterlo disattivare, e l'agenda lo disattiva sempre.
+
+- [ ] **Step 1: Test del campo `template` nello schema**
+
+In coda a `tests/layout/test_schema.py`:
+
+```python
+def test_il_rendering_dei_template_e_attivo_per_default() -> None:
+    page = validate_page(
+        {"cards": [{"type": "text", "grid": [0, 0, 2, 1], "text": "ciao"}]}
+    )
+
+    assert page["cards"][0]["template"] is True
+
+
+def test_il_rendering_dei_template_si_puo_disattivare() -> None:
+    """I titoli degli eventi di calendario sono dati esterni: eseguirli come
+    Jinja sarebbe un'iniezione di template."""
+    page = validate_page(
+        {
+            "cards": [
+                {"type": "text", "grid": [0, 0, 2, 1], "text": "x", "template": False}
+            ]
+        }
+    )
+
+    assert page["cards"][0]["template"] is False
+```
+
+- [ ] **Step 2: Eseguire e vedere fallire**
+
+Run: `.venv/bin/pytest tests/layout/test_schema.py -q`
+Expected: FAIL, `KeyError: 'template'` sul primo e `Invalid: extra keys not allowed` sul secondo.
+
+- [ ] **Step 3: Aggiungere il campo allo schema**
+
+In `custom_components/switchbot_eink/layout/schema.py`, dentro `CARD_SCHEMA`, subito dopo `z`:
+
+```python
+        # Disattivabile per i contenuti che non sono scritti dall'utente: i
+        # titoli degli eventi di calendario non devono essere eseguiti come Jinja.
+        vol.Optional("template", default=True): bool,
+```
+
+- [ ] **Step 4: Eseguire e vedere passare**
+
+Run: `.venv/bin/pytest tests/layout/test_schema.py -q`
+Expected: PASS
+
+- [ ] **Step 5: Test che il compilatore rispetti il campo**
+
+In coda a `tests/layout/test_compile.py`, adattando gli helper già presenti nel file:
+
+```python
+def test_una_card_con_template_disattivato_non_passa_dal_renderer() -> None:
+    """Regressione: senza questo, un evento intitolato con delle graffe verrebbe
+    eseguito invece che mostrato."""
+    pagina = validate_page(
+        {
+            "cards": [
+                {
+                    "type": "text",
+                    "grid": [0, 0, 6, 1],
+                    "text": "Riunione {{ 1 + 1 }}",
+                    "template": False,
+                }
+            ]
+        }
+    )
+
+    componenti = compile_page(pagina, lambda _testo: "RESO", _resolve)
+    extra = json.loads(componenti[0]["extra"])
+
+    assert extra["content"]["text"] == "Riunione {{ 1 + 1 }}"
+
+
+def test_una_card_normale_passa_ancora_dal_renderer() -> None:
+    pagina = validate_page(
+        {"cards": [{"type": "text", "grid": [0, 0, 6, 1], "text": "ciao"}]}
+    )
+
+    componenti = compile_page(pagina, lambda _testo: "RESO", _resolve)
+
+    assert json.loads(componenti[0]["extra"])["content"]["text"] == "RESO"
+```
+
+Sostituisci `_resolve` col nome che l'helper ha davvero in quel file.
+
+- [ ] **Step 6: Eseguire e vedere fallire il primo**
+
+Run: `.venv/bin/pytest tests/layout/test_compile.py -q`
+Expected: il primo FAIL (ottiene `"RESO"`), il secondo PASS.
+
+- [ ] **Step 7: Far rispettare il campo al compilatore**
+
+In `custom_components/switchbot_eink/layout/compile.py`, dentro `_content_for`, il renderer va applicato solo quando la card lo consente. Sostituisci ogni chiamata diretta a `render(...)` con una funzione locale definita in cima alla funzione:
+
+```python
+    # Una card con `template: false` porta contenuti che non sono scritti
+    # dall'utente — i titoli degli eventi di calendario, per esempio — e che
+    # eseguire come Jinja sarebbe un'iniezione.
+    rendi = render if card.get("template", True) else (lambda testo: testo)
+```
+
+e usa `rendi` al posto di `render` per tutto il corpo della funzione.
+
+- [ ] **Step 8: Eseguire e vedere passare**
+
+Run: `.venv/bin/pytest tests/ -q`
+Expected: tutto verde.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add custom_components/switchbot_eink/layout tests/layout
+git commit -m "feat(layout): card con rendering dei template disattivabile"
+```
+
+- [ ] **Step 10: Test dei marcatori dei calendari**
+
+File nuovo `tests/layout/test_agenda.py`:
+
+```python
+"""Test del generatore dell'agenda."""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+import pytest
+
+from custom_components.switchbot_eink.layout.agenda import (
+    CHAR_WIDTH_RATIO,
+    FINESTRA_GIORNI,
+    MAX_EVENTI_OGGI,
+    Event,
+    build_agenda_page,
+    calendar_markers,
+    truncate,
+)
+from custom_components.switchbot_eink.layout.compile import compile_page
+from custom_components.switchbot_eink.layout.schema import validate_page
+
+ADESSO = datetime(2026, 8, 23, 17, 24)
+
+
+def evento(ora: int, titolo: str, calendario: str = "Personale", giorno: int = 0,
+           all_day: bool = False) -> Event:
+    inizio = ADESSO.replace(hour=ora, minute=0) + timedelta(days=giorno)
+    return Event(
+        start=inizio,
+        end=inizio + timedelta(hours=1),
+        summary=titolo,
+        all_day=all_day,
+        calendar=calendario,
+    )
+
+
+def test_un_solo_calendario_non_ha_bisogno_di_marcatori() -> None:
+    assert calendar_markers(["Personale"]) == {"Personale": "P"}
+
+
+def test_due_calendari_diversi_prendono_liniziale() -> None:
+    assert calendar_markers(["Lavoro", "Famiglia"]) == {"Lavoro": "L", "Famiglia": "F"}
+
+
+def test_liniziale_condivisa_si_estende_a_due_lettere() -> None:
+    marcatori = calendar_markers(["Lavoro", "Ludoteca"])
+
+    assert marcatori["Lavoro"] == "L"
+    assert marcatori["Ludoteca"] == "LU"
+
+
+def test_lambiguita_residua_ripiega_su_una_cifra() -> None:
+    marcatori = calendar_markers(["Lavoro", "La", "Lavanderia"])
+
+    assert len(set(marcatori.values())) == 3
+    assert all(len(m) <= 2 for m in marcatori.values())
+
+
+def test_i_marcatori_sono_deterministici() -> None:
+    nomi = ["Lavoro", "Ludoteca", "Famiglia"]
+
+    assert calendar_markers(nomi) == calendar_markers(nomi)
+```
+
+- [ ] **Step 11: Eseguire e vedere fallire**
+
+Run: `.venv/bin/pytest tests/layout/test_agenda.py -q`
+Expected: FAIL con `ModuleNotFoundError: ...layout.agenda`
+
+- [ ] **Step 12: Test del troncamento**
+
+In coda a `tests/layout/test_agenda.py`:
+
+```python
+def test_un_testo_corto_non_viene_toccato() -> None:
+    assert truncate("Palestra", 464, 22) == "Palestra"
+
+
+def test_un_testo_lungo_viene_chiuso_da_unellissi() -> None:
+    lungo = "Riunione di allineamento trimestrale con tutto il reparto"
+    tagliato = truncate(lungo, 464, 22)
+
+    assert tagliato.endswith("…")
+    assert len(tagliato) < len(lungo)
+
+
+def test_il_troncamento_lascia_almeno_un_carattere() -> None:
+    """Un rettangolo assurdo non deve produrre una stringa vuota o un errore."""
+    assert truncate("Palestra", 4, 22) != ""
+
+
+def test_un_corpo_piu_grande_lascia_meno_caratteri() -> None:
+    lungo = "x" * 200
+
+    assert len(truncate(lungo, 464, 30)) < len(truncate(lungo, 464, 16))
+```
+
+- [ ] **Step 13: Test della pagina generata**
+
+In coda a `tests/layout/test_agenda.py`:
+
+```python
+def testi_di(page: dict) -> list[str]:
+    return [c["text"] for c in page["cards"] if c["type"] == "text"]
+
+
+def test_la_pagina_generata_e_valida_e_compilabile() -> None:
+    """Il generatore non e' un percorso parallelo: produce quello che lo schema
+    valida e che il compilatore sa gia' tradurre."""
+    page = build_agenda_page([evento(9, "Riunione")], ADESSO)
+
+    validata = validate_page(page)
+    componenti = compile_page(validata, lambda t: t, lambda _e: None)
+
+    assert componenti
+
+
+def test_la_pagina_finisce_sulla_home() -> None:
+    assert build_agenda_page([], ADESSO)["page"] == "home"
+
+
+def test_lintestazione_nomina_il_giorno_di_oggi() -> None:
+    testi = testi_di(build_agenda_page([evento(9, "Riunione")], ADESSO))
+
+    assert any("OGGI" in t and "sabato 23 agosto" in t for t in testi)
+
+
+def test_gli_eventi_di_oggi_compaiono_con_ora_e_titolo() -> None:
+    testi = testi_di(build_agenda_page([evento(9, "Riunione")], ADESSO))
+
+    assert "09:00" in testi
+    assert "Riunione" in testi
+
+
+def test_gli_eventi_di_oggi_sono_in_ordine_di_ora() -> None:
+    page = build_agenda_page(
+        [evento(18, "Palestra"), evento(9, "Riunione"), evento(13, "Pranzo")], ADESSO
+    )
+    testi = testi_di(page)
+
+    assert testi.index("09:00") < testi.index("13:00") < testi.index("18:00")
+
+
+def test_un_evento_di_tutto_il_giorno_non_mostra_unora_finta() -> None:
+    page = build_agenda_page([evento(0, "Ferie", all_day=True)], ADESSO)
+    testi = testi_di(page)
+
+    assert "00:00" not in testi
+    assert any("Tutto il giorno" in t and "Ferie" in t for t in testi)
+
+
+def test_gli_eventi_oltre_il_massimo_diventano_una_riga_di_riepilogo() -> None:
+    """Far sparire eventi in silenzio e' peggio che dire quanti ne mancano."""
+    eventi = [evento(8 + i, f"Evento {i}") for i in range(MAX_EVENTI_OGGI + 3)]
+    testi = testi_di(build_agenda_page(eventi, ADESSO))
+
+    assert "+3 altri" in testi
+    assert f"Evento {MAX_EVENTI_OGGI + 2}" not in testi
+
+
+def test_esattamente_il_massimo_non_produce_la_riga_di_riepilogo() -> None:
+    eventi = [evento(8 + i, f"Evento {i}") for i in range(MAX_EVENTI_OGGI)]
+    testi = testi_di(build_agenda_page(eventi, ADESSO))
+
+    assert not any(t.startswith("+") and t.endswith("altri") for t in testi)
+
+
+def test_i_giorni_successivi_stanno_su_una_riga_ciascuno() -> None:
+    page = build_agenda_page(
+        [evento(9, "Dentista", giorno=1), evento(10, "Call", giorno=2)], ADESSO
+    )
+    testi = testi_di(page)
+
+    assert any(t.startswith("DOM 24") and "Dentista" in t for t in testi)
+    assert any(t.startswith("LUN 25") and "Call" in t for t in testi)
+
+
+def test_la_finestra_scarta_quello_che_cade_oltre() -> None:
+    testi = testi_di(
+        build_agenda_page([evento(9, "Troppo in la", giorno=FINESTRA_GIORNI)], ADESSO)
+    )
+
+    assert not any("Troppo in la" in t for t in testi)
+
+
+def test_lagenda_vuota_lo_dice_invece_di_sembrare_rotta() -> None:
+    testi = testi_di(build_agenda_page([], ADESSO))
+
+    assert any("Nessun evento" in t for t in testi)
+
+
+def test_lora_di_aggiornamento_e_sempre_presente() -> None:
+    """Il pannello legge ogni tre ore: senza questa riga chi guarda non puo'
+    distinguere un'agenda fresca da una di stamattina."""
+    for eventi in ([], [evento(9, "Riunione")]):
+        testi = testi_di(build_agenda_page(eventi, ADESSO))
+
+        assert "agg. 17:24" in testi
+
+
+def test_con_un_solo_calendario_non_compaiono_marcatori() -> None:
+    page = build_agenda_page([evento(9, "Riunione")], ADESSO, calendars=["Personale"])
+
+    assert "P" not in testi_di(page)
+
+
+def test_con_piu_calendari_ogni_evento_porta_il_suo_marcatore() -> None:
+    page = build_agenda_page(
+        [evento(9, "Riunione", "Lavoro"), evento(18, "Cena", "Famiglia")],
+        ADESSO,
+        calendars=["Lavoro", "Famiglia"],
+    )
+    testi = testi_di(page)
+
+    assert "L" in testi
+    assert "F" in testi
+
+
+def test_i_marcatori_dipendono_dai_calendari_scelti_non_da_quelli_con_eventi() -> None:
+    """Se un calendario oggi e' vuoto, i marcatori degli altri non devono
+    sparire: l'utente ne ha scelti due e si aspetta di distinguerli."""
+    page = build_agenda_page(
+        [evento(9, "Riunione", "Lavoro")], ADESSO, calendars=["Lavoro", "Famiglia"]
+    )
+
+    assert "L" in testi_di(page)
+
+
+def test_nessuna_card_esce_dallarea_utile() -> None:
+    eventi = [evento(8 + i, "x" * 200) for i in range(MAX_EVENTI_OGGI + 2)]
+    page = validate_page(build_agenda_page(eventi, ADESSO, calendars=["A", "B"]))
+
+    for card in page["cards"]:
+        x, y, w, h = card["position"]
+        assert 0 <= x and 0 <= y
+        assert x + w <= 560
+        assert y + h <= 380
+
+
+def test_i_titoli_non_passano_dal_motore_di_template() -> None:
+    """Un evento intitolato con delle graffe arriva da un invito esterno: va
+    mostrato, non eseguito."""
+    page = build_agenda_page([evento(9, "Riunione {{ 1 + 1 }}")], ADESSO)
+
+    assert all(c.get("template") is False for c in page["cards"] if c["type"] == "text")
+
+    componenti = compile_page(
+        validate_page(page), lambda _t: "ESEGUITO", lambda _e: None
+    )
+    testi = [json.loads(c["extra"])["content"].get("text") for c in componenti]
+
+    assert "ESEGUITO" not in testi
+```
+
+Aggiungi `import json` in cima al file di test.
+
+- [ ] **Step 14: Eseguire e vedere fallire**
+
+Run: `.venv/bin/pytest tests/layout/test_agenda.py -q`
+Expected: FAIL, il modulo non esiste ancora.
+
+- [ ] **Step 15: Scrivere il generatore**
+
+File `custom_components/switchbot_eink/layout/agenda.py`:
+
+```python
+"""Genera la pagina dell'agenda dagli eventi dei calendari.
+
+Non introduce un tipo di card nuovo: produce la stessa struttura che
+`validate_page` valida e che `compile_page` traduce in componenti. Puro come il
+resto dello strato: niente Home Assistant, niente `api/`.
+"""
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from typing import Any
+
+from .const import USABLE_WIDTH
+
+# Il pannello e' configurato in italiano — lo dichiara la risposta di `preview` —
+# quindi i nomi stanno qui. Estrarli in un catalogo di lingue e' un problema per
+# quando servira' la seconda lingua.
+GIORNI: tuple[str, ...] = (
+    "lunedi",
+    "martedi",
+    "mercoledi",
+    "giovedi",
+    "venerdi",
+    "sabato",
+    "domenica",
+)
+GIORNI_BREVI: tuple[str, ...] = ("LUN", "MAR", "MER", "GIO", "VEN", "SAB", "DOM")
+MESI: tuple[str, ...] = (
+    "gennaio",
+    "febbraio",
+    "marzo",
+    "aprile",
+    "maggio",
+    "giugno",
+    "luglio",
+    "agosto",
+    "settembre",
+    "ottobre",
+    "novembre",
+    "dicembre",
+)
+
+FINESTRA_GIORNI = 3
+MAX_EVENTI_OGGI = 6
+
+# Larghezza media di un carattere come frazione del corpo. E' una stima: i font
+# del pannello non hanno spaziatura fissa e non ne abbiamo le metriche. Vive in
+# un posto solo proprio perche' va tarata con una prova sul dispositivo.
+CHAR_WIDTH_RATIO = 0.52
+
+# Geometria, in coordinate dell'area utile (560 x 380).
+_Y_INTESTAZIONE = 0
+_Y_FILETTO_ALTO = 34
+_Y_PRIMA_RIGA = 44
+_ALTEZZA_RIGA = 34
+_Y_RIEPILOGO = 248
+_Y_FILETTO_BASSO = 278
+_Y_PRIMO_GIORNO = 288
+_ALTEZZA_RIGA_GIORNO = 30
+_Y_AGGIORNAMENTO = 352
+
+_CORPO_INTESTAZIONE = 24
+_CORPO_EVENTO = 22
+_CORPO_MARCATORE = 18
+_CORPO_GIORNO = 16
+_CORPO_AGGIORNAMENTO = 13
+
+_LARGHEZZA_MARCATORE = 12
+_LARGHEZZA_ORA = 72
+
+
+@dataclass(frozen=True, slots=True)
+class Event:
+    """Un evento di calendario, senza tipi di Home Assistant."""
+
+    start: datetime
+    end: datetime
+    summary: str
+    all_day: bool
+    calendar: str
+
+
+def calendar_markers(names: Sequence[str]) -> dict[str, str]:
+    """Un marcatore di al massimo due caratteri per ciascun calendario.
+
+    Deterministico: iniziale maiuscola, estesa a due lettere in caso di
+    collisione, e a una cifra progressiva se l'ambiguita' resta. Serve perche' il
+    pannello offre solo `black` e `gray` come tonalita' di testo: distinguere i
+    calendari col colore non e' possibile oltre i due.
+    """
+    marcatori: dict[str, str] = {}
+    presi: set[str] = set()
+
+    for indice, nome in enumerate(names):
+        pulito = nome.strip() or "?"
+        candidato = next(
+            (c for c in (pulito[0].upper(), pulito[:2].upper()) if c not in presi),
+            None,
+        )
+        if candidato is None:
+            contatore = indice + 1
+            candidato = str(contatore)
+            while candidato in presi:
+                contatore += 1
+                candidato = str(contatore)
+
+        presi.add(candidato)
+        marcatori[nome] = candidato
+
+    return marcatori
+
+
+def truncate(text: str, width_px: int, font_size: int) -> str:
+    """Taglia il testo alla larghezza disponibile, chiudendolo con un'ellissi."""
+    massimo = max(1, int(width_px / (CHAR_WIDTH_RATIO * font_size)))
+    if len(text) <= massimo:
+        return text
+    return text[: max(1, massimo - 1)].rstrip() + "…"
+
+
+def _card(
+    testo: str,
+    rettangolo: tuple[int, int, int, int],
+    corpo: int,
+    allineamento: str = "left",
+) -> dict[str, Any]:
+    x, y, larghezza, altezza = rettangolo
+    return {
+        "type": "text",
+        "text": testo,
+        # I titoli arrivano da inviti e calendari condivisi: dati che l'utente
+        # non controlla. Eseguirli come Jinja sarebbe un'iniezione.
+        "template": False,
+        "position": [x, y, larghezza, altezza],
+        "style": {"fontSize": corpo, "align": allineamento},
+    }
+
+
+def _filetto(y: int) -> dict[str, Any]:
+    return {"type": "divider", "position": [0, y, USABLE_WIDTH, 2]}
+
+
+def _intestazione(giorno: date) -> str:
+    return f"OGGI · {GIORNI[giorno.weekday()]} {giorno.day} {MESI[giorno.month - 1]}"
+
+
+def _sintesi(evento: Event) -> str:
+    if evento.all_day:
+        return f"{evento.summary} (tutto il giorno)"
+    return f"{evento.start.strftime('%H:%M')} {evento.summary}"
+
+
+def _riga_giorno(giorno: date, eventi: Sequence[Event]) -> str:
+    etichetta = f"{GIORNI_BREVI[giorno.weekday()]} {giorno.day}"
+    if not eventi:
+        return f"{etichetta}   nessun evento"
+    return f"{etichetta}   " + " · ".join(_sintesi(e) for e in eventi)
+
+
+def _per_giorno(
+    events: Sequence[Event], giorni: Sequence[date]
+) -> dict[date, list[Event]]:
+    raggruppati: dict[date, list[Event]] = {giorno: [] for giorno in giorni}
+    for evento in events:
+        giorno = evento.start.date()
+        if giorno in raggruppati:
+            raggruppati[giorno].append(evento)
+    for eventi in raggruppati.values():
+        # Quelli di tutto il giorno vanno in testa: non hanno un'ora con cui
+        # collocarsi fra gli altri.
+        eventi.sort(key=lambda e: (not e.all_day, e.start))
+    return raggruppati
+
+
+def build_agenda_page(
+    events: Sequence[Event],
+    now: datetime,
+    calendars: Sequence[str] | None = None,
+    page_slot: str = "home",
+    name: str = "Agenda",
+) -> dict[str, Any]:
+    """Costruisce la definizione di pagina dell'agenda.
+
+    `calendars` sono i calendari *scelti dall'utente*, non quelli che oggi hanno
+    eventi: i marcatori non devono sparire quando un calendario e' vuoto.
+    """
+    oggi = now.date()
+    giorni = [oggi + timedelta(days=scarto) for scarto in range(FINESTRA_GIORNI)]
+    raggruppati = _per_giorno(events, giorni)
+
+    nomi = list(calendars) if calendars is not None else sorted(
+        {evento.calendar for evento in events}
+    )
+    marcatori = calendar_markers(nomi) if len(nomi) > 1 else {}
+
+    cards: list[dict[str, Any]] = [
+        _card(_intestazione(oggi), (0, _Y_INTESTAZIONE, USABLE_WIDTH, 32),
+              _CORPO_INTESTAZIONE),
+        _filetto(_Y_FILETTO_ALTO),
+    ]
+
+    if not any(raggruppati.values()):
+        cards.append(
+            _card(
+                f"Nessun evento nei prossimi {FINESTRA_GIORNI} giorni",
+                (0, 140, USABLE_WIDTH, 32),
+                _CORPO_EVENTO,
+                "center",
+            )
+        )
+    else:
+        cards.extend(_righe_di_oggi(raggruppati[oggi], marcatori))
+        cards.append(_filetto(_Y_FILETTO_BASSO))
+        for indice, giorno in enumerate(giorni[1:]):
+            cards.append(
+                _card(
+                    truncate(
+                        _riga_giorno(giorno, raggruppati[giorno]),
+                        USABLE_WIDTH,
+                        _CORPO_GIORNO,
+                    ),
+                    (0, _Y_PRIMO_GIORNO + indice * _ALTEZZA_RIGA_GIORNO,
+                     USABLE_WIDTH, 28),
+                    _CORPO_GIORNO,
+                )
+            )
+
+    cards.append(
+        _card(
+            f"agg. {now.strftime('%H:%M')}",
+            (360, _Y_AGGIORNAMENTO, 200, 22),
+            _CORPO_AGGIORNAMENTO,
+            "right",
+        )
+    )
+
+    return {"page": page_slot, "name": name, "cards": cards}
+
+
+def _righe_di_oggi(
+    eventi: Sequence[Event], marcatori: dict[str, str]
+) -> list[dict[str, Any]]:
+    visibili = list(eventi[:MAX_EVENTI_OGGI])
+    cards: list[dict[str, Any]] = []
+
+    if marcatori:
+        x_ora, x_titolo = _LARGHEZZA_MARCATORE + 4, 96
+    else:
+        x_ora, x_titolo = 0, 80
+    larghezza_titolo = USABLE_WIDTH - x_titolo
+
+    for indice, evento in enumerate(visibili):
+        y = _Y_PRIMA_RIGA + indice * _ALTEZZA_RIGA
+
+        if marcatori:
+            cards.append(
+                _card(
+                    marcatori.get(evento.calendar, ""),
+                    (0, y, _LARGHEZZA_MARCATORE, 30),
+                    _CORPO_MARCATORE,
+                )
+            )
+
+        ora = "" if evento.all_day else evento.start.strftime("%H:%M")
+        titolo = (
+            f"Tutto il giorno · {evento.summary}" if evento.all_day else evento.summary
+        )
+
+        cards.append(_card(ora, (x_ora, y, _LARGHEZZA_ORA, 30), _CORPO_EVENTO, "right"))
+        cards.append(
+            _card(
+                truncate(titolo, larghezza_titolo, _CORPO_EVENTO),
+                (x_titolo, y, larghezza_titolo, 30),
+                _CORPO_EVENTO,
+            )
+        )
+
+    nascosti = len(eventi) - len(visibili)
+    if nascosti:
+        cards.append(
+            _card(
+                f"+{nascosti} altri",
+                (360, _Y_RIEPILOGO, 200, 24),
+                _CORPO_GIORNO,
+                "right",
+            )
+        )
+
+    return cards
+```
+
+- [ ] **Step 16: Eseguire e vedere passare**
+
+Run: `.venv/bin/pytest tests/layout/test_agenda.py -q`
+Expected: PASS
+
+Se un test sulla geometria fallisce, il difetto è nelle costanti, non nel test: i rettangoli devono stare dentro 560 × 380 e non sovrapporsi.
+
+- [ ] **Step 17: Esportare dal pacchetto**
+
+In `custom_components/switchbot_eink/layout/__init__.py`, aggiungi all'import e a `__all__`:
+
+```python
+from .agenda import Event, build_agenda_page
+```
+
+- [ ] **Step 18: Eseguire tutta la suite**
+
+Run: `.venv/bin/pytest tests/ -q`
+Expected: tutto verde.
+
+- [ ] **Step 19: Commit**
+
+```bash
+git add custom_components/switchbot_eink/layout tests/layout
+git commit -m "feat(layout): generatore della pagina agenda"
+```
+
+---
+
+### Task 12: Coordinator e setup della entry
 
 **Files:**
 - Create: `custom_components/switchbot_eink/coordinator.py`
@@ -4066,7 +4791,70 @@ git commit -m "feat(ha): aggiungi manifest, costanti e config flow"
 - Consumes: da Task 4 — `SwitchBotCanvasClient`, `Template`, `TemplateSummary`; da Task 9 — `compile_page`, `components_hash`, `EntityValue`, `LayoutError`; da Task 10 — tutte le costanti.
 - Produces: `SwitchBotEinkCoordinator(hass, entry, client, page)` con `async_publish(force: bool = False) -> bool` (ritorna `True` se ha pubblicato), gli attributi `last_published: datetime | None` e `auth_ok: bool`, e il type alias `SwitchBotEinkConfigEntry = ConfigEntry[SwitchBotEinkCoordinator]`.
 
-La pagina arriva da `configuration.yaml` sotto la chiave `switchbot_eink`, validata con `validate_page` del Task 8.
+**Modifica rispetto alla stesura originale — leggila prima dei passi.** Questo task era stato scritto quando il contenuto del pannello doveva essere una dashboard di stato definita a mano in `configuration.yaml`. Non è più così: il pannello si aggiorna ogni tre ore, e il contenuto è diventato **un'agenda generata dai calendari di Home Assistant**. Dove i passi qui sotto dicono "la pagina arriva da `configuration.yaml`", vale invece quanto segue.
+
+**Da dove arriva la pagina.** Ad ogni ciclo il coordinator:
+
+1. legge le entità di calendario scelte dall'utente, da `entry.options[CONF_CALENDARS]`;
+2. ne chiede gli eventi delle prossime `FINESTRA_GIORNI` giornate;
+3. genera la definizione di pagina con `build_agenda_page`;
+4. la valida con `validate_page` e la compila con `compile_page`.
+
+La lettura degli eventi usa il servizio `calendar.get_events`, che è il modo supportato per leggere i calendari dall'esterno del loro componente:
+
+```python
+    async def _eventi(self) -> list[Event]:
+        """Legge gli eventi dei calendari scelti.
+
+        `calendar.get_events` e' l'unico modo supportato per leggerli da fuori:
+        le entita' di calendario non espongono gli eventi nel loro stato.
+        """
+        entita = self.entry.options.get(CONF_CALENDARS, [])
+        if not entita:
+            return []
+
+        inizio = dt_util.start_of_local_day()
+        risposta = await self.hass.services.async_call(
+            "calendar",
+            "get_events",
+            {
+                "entity_id": list(entita),
+                "start_date_time": inizio,
+                "end_date_time": inizio + timedelta(days=FINESTRA_GIORNI),
+            },
+            blocking=True,
+            return_response=True,
+        )
+
+        eventi: list[Event] = []
+        for entity_id, payload in (risposta or {}).items():
+            nome = self._nome_calendario(entity_id)
+            for grezzo in payload.get("events", []):
+                eventi.append(self._evento_da_payload(grezzo, nome))
+        return eventi
+```
+
+`_evento_da_payload` converte le due forme che il servizio restituisce: un evento con orario ha `start` e `end` come stringhe ISO con fuso, uno di tutto il giorno le ha come date pure (`YYYY-MM-DD`). Distinguile sulla lunghezza della stringa, non su una `try/except`, e imposta `all_day` di conseguenza. `_nome_calendario` prende il `friendly_name` dallo stato dell'entità, ripiegando sull'`entity_id` se manca.
+
+**Nuova opzione.** All'`OptionsFlow` del Task 10 va aggiunta la scelta dei calendari, con il selettore di entità di Home Assistant limitato al dominio `calendar` e a scelta multipla:
+
+```python
+                    vol.Optional(
+                        CONF_CALENDARS,
+                        default=self.config_entry.options.get(CONF_CALENDARS, []),
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="calendar", multiple=True)
+                    ),
+```
+
+Aggiungi `CONF_CALENDARS: Final = "calendars"` a `const.py` e le stringhe corrispondenti nei tre file di traduzione (it: "Calendari da mostrare", en: "Calendars to show").
+
+**Nessun calendario scelto** non è un errore: è lo stato iniziale subito dopo l'installazione. Produce l'agenda vuota, che dice "Nessun evento nei prossimi 3 giorni". Il coordinator non deve sollevare eccezioni né rifiutarsi di pubblicare.
+
+**I test di questo task** vanno adattati di conseguenza: dove il piano costruisce `PAGINA` con `validate_page({...})` a mano, va usato `build_agenda_page` con eventi finti, e il servizio `calendar.get_events` va simulato con `hass.services.async_register` o con una patch su `async_call`. Il resto della logica del coordinator — hash, intervallo minimo, `update_template` seguito da `release`, gestione del token scaduto — non cambia e i suoi test valgono così come sono scritti.
+
+**L'intervallo di pubblicazione resta 900 secondi**, non tre ore. Il pannello legge ciò che trova sul server quando si sveglia: pubblicare più spesso di quanto legga riduce l'età del dato che troverà, non la spreca.
+
 
 - [ ] **Step 1: Scrivere il test che fallisce**
 
@@ -4518,7 +5306,7 @@ git commit -m "feat(ha): aggiungi coordinator con pubblicazione condizionata all
 
 ---
 
-### Task 12: Servizi ed entità diagnostiche
+### Task 13: Servizi ed entità diagnostiche
 
 **Files:**
 - Create: `custom_components/switchbot_eink/services.yaml`
@@ -4528,7 +5316,7 @@ git commit -m "feat(ha): aggiungi coordinator con pubblicazione condizionata all
 - Test: `tests/ha/test_services.py`
 
 **Interfaces:**
-- Consumes: da Task 11 — `SwitchBotEinkCoordinator`, `SwitchBotEinkConfigEntry`; da Task 10 — `SERVICE_REFRESH`, `SERVICE_PUSH_TEXT`, `DOMAIN`.
+- Consumes: da Task 12 — `SwitchBotEinkCoordinator`, `SwitchBotEinkConfigEntry`; da Task 10 — `SERVICE_REFRESH`, `SERVICE_PUSH_TEXT`, `DOMAIN`.
 - Produces: i servizi `switchbot_eink.refresh` e `switchbot_eink.push_text`, l'entità `sensor.<device>_ultima_pubblicazione` e l'entità `binary_sensor.<device>_autenticazione`, più il metodo `SwitchBotEinkCoordinator.async_push_text(card_name: str, text: str) -> None`.
 
 - [ ] **Step 1: Scrivere il test che fallisce**
@@ -4934,7 +5722,7 @@ git commit -m "feat(ha): aggiungi servizi refresh e push_text con entita' diagno
 
 ---
 
-### Task 13: Confezionamento HACS e documentazione
+### Task 14: Confezionamento HACS e documentazione
 
 **Files:**
 - Create: `hacs.json`
