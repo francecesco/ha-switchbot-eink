@@ -32,7 +32,7 @@ from custom_components.switchbot_eink.api.auth import CanvasAuth  # noqa: E402
 from custom_components.switchbot_eink.api.client import SwitchBotCanvasClient  # noqa: E402
 from custom_components.switchbot_eink.api.envelope import normalize_region  # noqa: E402
 from custom_components.switchbot_eink.api.errors import SwitchBotCanvasError  # noqa: E402
-from custom_components.switchbot_eink.api.models import Template  # noqa: E402
+from custom_components.switchbot_eink.api.models import Template, TemplateSummary  # noqa: E402
 
 
 def _wire(
@@ -106,6 +106,111 @@ def build_origin_components() -> list[dict[str, str]]:
             },
         ),
     ]
+
+
+def build_ruler_components(
+    x_valori: list[int], y_valori: list[int]
+) -> list[dict[str, str]]:
+    """Un righello sulle due assi, per scoprire dove cade davvero l'origine.
+
+    La spec assumeva due fasce orizzontali (safeTop 64, safeBottom 44). Sul
+    dispositivo vero c'e' invece una barra verticale a sinistra, quindi l'area
+    utile non e' quella che credevamo e va misurata, non dedotta.
+
+    Le etichette sono sfalsate sull'asse opposto a quello che misurano: cosi'
+    non si sovrappongono nemmeno con passi fini, e ciascuna comincia esattamente
+    alla coordinata che porta scritta (`align: left`, `valign: top`).
+    """
+    componenti: list[dict[str, str]] = []
+    identificativo = 1
+
+    def etichetta(x: int, y: int, testo: str, nome: str) -> None:
+        nonlocal identificativo
+        componenti.append(
+            _wire(
+                str(identificativo),
+                "text",
+                nome,
+                {"x": x, "y": y, "w": 76, "h": 30, "z": 1, "fontSize": 18,
+                 "align": "left", "valign": "top"},
+                {
+                    "dataMode": "text",
+                    "source": "custom",
+                    "refresh": "1h",
+                    "content": {"text": testo},
+                    "locked": False,
+                    "visible": True,
+                },
+            )
+        )
+        identificativo += 1
+
+    # Asse x: ogni etichetta a un'altezza diversa, cosi' passi da 10 px non
+    # fanno collidere le caselle larghe 76.
+    for indice, x in enumerate(x_valori):
+        etichetta(x, 30 + indice * 34, f"x{x}", f"x={x}")
+
+    # Asse y: sfalsate in orizzontale, e ben lontane dalla barra laterale.
+    for indice, y in enumerate(y_valori):
+        etichetta(420 + (indice % 4) * 84, y, f"y{y}", f"y={y}")
+
+    return componenti
+
+
+def build_frame_components(
+    x0: int, y0: int, x1: int, y1: int
+) -> list[dict[str, str]]:
+    """Quattro etichette agli angoli del rettangolo proposto come area utile.
+
+    Non misura: verifica. Se tutte e quattro si leggono per intero, il
+    rettangolo e' interamente visibile e la geometria e' quella giusta.
+    """
+    larghezza, altezza = 76, 30
+    angoli = (
+        (x0, y0, "AS"),
+        (x1 - larghezza, y0, "AD"),
+        (x0, y1 - altezza, "BS"),
+        (x1 - larghezza, y1 - altezza, "BD"),
+    )
+
+    componenti: list[dict[str, str]] = []
+    for indice, (x, y, testo) in enumerate(angoli, start=1):
+        componenti.append(
+            _wire(
+                str(indice),
+                "text",
+                f"angolo {testo}",
+                {"x": x, "y": y, "w": larghezza, "h": altezza, "z": 1,
+                 "fontSize": 20, "align": "left", "valign": "top"},
+                {
+                    "dataMode": "text",
+                    "source": "custom",
+                    "refresh": "1h",
+                    "content": {"text": testo},
+                    "locked": False,
+                    "visible": True,
+                },
+            )
+        )
+
+    componenti.append(
+        _wire(
+            "5",
+            "text",
+            "misure",
+            {"x": x0, "y": (y0 + y1) // 2 - 15, "w": x1 - x0, "h": 30, "z": 1,
+             "fontSize": 20, "align": "center"},
+            {
+                "dataMode": "text",
+                "source": "custom",
+                "refresh": "1h",
+                "content": {"text": f"{x0},{y0} - {x1},{y1}"},
+                "locked": False,
+                "visible": True,
+            },
+        )
+    )
+    return componenti
 
 
 def build_metric_components() -> list[dict[str, str]]:
@@ -192,6 +297,41 @@ async def _connect(session: aiohttp.ClientSession) -> tuple[SwitchBotCanvasClien
     return client, devices[0].device_id
 
 
+def templates_to_wipe(summaries: list[TemplateSummary]) -> list[TemplateSummary]:
+    """Tutto tranne la home.
+
+    La home non si cancella, si sovrascrive: e' la pagina che il pannello mostra
+    all'accensione, e cosa faccia il firmware se sparisce non lo sappiamo.
+    """
+    return [s for s in summaries if s.page_slot != "home"]
+
+
+async def _wipe(client: SwitchBotCanvasClient, device_id: str, conferma: bool) -> None:
+    """Cancella le pagine custom, lasciando solo la home."""
+    tutti = await client.list_templates(device_id)
+    da_cancellare = templates_to_wipe(tutti)
+
+    if not da_cancellare:
+        print("Nessuna pagina custom da cancellare: c'e' gia' solo la home.")
+        return
+
+    print("Verranno cancellati definitivamente:")
+    for summary in da_cancellare:
+        print(f"  id {summary.template_id:<6} slot {summary.page_slot:<11} {summary.name}")
+
+    if not conferma:
+        print("\nProva a vuoto: non ho cancellato niente.")
+        print("Per cancellare davvero, rilancia con --yes.")
+        return
+
+    for summary in da_cancellare:
+        await client.delete_template(summary.template_id, device_id)
+        print(f"Cancellato {summary.template_id}")
+
+    await client.release(device_id)
+    print("Fatto. Sul pannello resta solo la home.")
+
+
 async def _publish(
     client: SwitchBotCanvasClient,
     device_id: str,
@@ -230,19 +370,48 @@ async def _publish(
         await client.update_template(template)
 
     await client.release(device_id)
-    print("Pubblicato. Scorri fino alla pagina custom sul dispositivo.")
+    if slot == "home":
+        print("Pubblicato sulla home. Premi il pulsante 2s per farla scaricare.")
+    else:
+        print("Pubblicato. Scorri fino alla pagina custom sul dispositivo.")
 
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Sonda per il pannello e-ink SwitchBot")
     parser.add_argument(
-        "command", choices=["devices", "clock", "origin", "metric", "templates"]
+        "command",
+        choices=[
+            "devices",
+            "clock",
+            "origin",
+            "metric",
+            "templates",
+            "ruler",
+            "frame",
+            "wipe",
+            "preview",
+        ],
     )
     parser.add_argument(
         "--slot",
-        default="custom1",
-        choices=("custom1", "custom2", "custom3", "custom4"),
-        help="pagina custom su cui pubblicare",
+        default="home",
+        choices=("home", "custom1", "custom2", "custom3", "custom4"),
+        help="pagina su cui pubblicare (default: home)",
+    )
+    parser.add_argument("--x0", type=int, default=240)
+    parser.add_argument("--y0", type=int, default=0)
+    parser.add_argument("--x1", type=int, default=800)
+    parser.add_argument("--y1", type=int, default=370)
+    parser.add_argument("--x-from", type=int, default=0)
+    parser.add_argument("--x-to", type=int, default=280)
+    parser.add_argument("--x-step", type=int, default=40)
+    parser.add_argument("--y-from", type=int, default=0)
+    parser.add_argument("--y-to", type=int, default=440)
+    parser.add_argument("--y-step", type=int, default=40)
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="con `wipe`, cancella davvero invece di fare una prova a vuoto",
     )
     args = parser.parse_args()
 
@@ -260,6 +429,23 @@ async def main() -> None:
                 for summary in await client.list_templates(device_id):
                     print(f"  {summary.template_id}  {summary.page_slot:<12} {summary.name}")
 
+            elif args.command == "preview":
+                # Sola lettura: mostra cosa il backend consegnerebbe al pannello.
+                # Serve a distinguere "la nostra scrittura non e' arrivata" da
+                # "il dispositivo e' lento a scaricarla".
+                sullo_slot = [
+                    s
+                    for s in await client.list_templates(device_id)
+                    if s.page_slot == args.slot
+                ]
+                if not sullo_slot:
+                    raise SystemExit(f"Nessun template sullo slot {args.slot}.")
+                dati = await client.preview(sullo_slot[0].template_id, device_id)
+                print(json.dumps(dati, indent=2, ensure_ascii=False)[:2000])
+
+            elif args.command == "wipe":
+                await _wipe(client, device_id, args.yes)
+
             elif args.command == "clock":
                 now = datetime.now().strftime("%H:%M:%S")
                 await _publish(
@@ -270,6 +456,27 @@ async def main() -> None:
             elif args.command == "origin":
                 await _publish(
                     client, device_id, args.slot, "Sonda origine", build_origin_components()
+                )
+
+            elif args.command == "ruler":
+                await _publish(
+                    client,
+                    device_id,
+                    args.slot,
+                    "Sonda righello",
+                    build_ruler_components(
+                        list(range(args.x_from, args.x_to + 1, args.x_step)),
+                        list(range(args.y_from, args.y_to + 1, args.y_step)),
+                    ),
+                )
+
+            elif args.command == "frame":
+                await _publish(
+                    client,
+                    device_id,
+                    args.slot,
+                    "Sonda telaio",
+                    build_frame_components(args.x0, args.y0, args.x1, args.y1),
                 )
 
             elif args.command == "metric":
