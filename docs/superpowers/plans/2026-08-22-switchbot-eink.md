@@ -1222,6 +1222,20 @@ def page_slot_to_sort_order(page_slot: str) -> int:
     return int(match.group(1)) if match else 0
 
 
+def sort_order_to_page_slot(sort_order: int, template_type: int) -> str:
+    """Ricava lo slot da `sortOrder` e `templateType`.
+
+    La risposta del backend non contiene lo slot: va dedotto. Servono entrambi i
+    campi, perche' la home e `custom1` hanno tutti e due `sortOrder` 1 e si
+    distinguono solo per `templateType`.
+    """
+    if template_type == 1:
+        return "home"
+    if 1 <= sort_order <= 4:
+        return f"custom{sort_order}"
+    return "unassigned"
+
+
 @dataclass(frozen=True, slots=True)
 class Device:
     """Un dispositivo dell'account."""
@@ -1248,6 +1262,7 @@ class TemplateSummary:
     template_id: int
     name: str
     page_slot: str
+    template_type: int = 0
 
 
 @dataclass(slots=True)
@@ -1355,14 +1370,19 @@ class SwitchBotCanvasClient:
     async def list_templates(self, device_id: str) -> list[TemplateSummary]:
         payload = await self._http.request(PATH_TPL_LIST, {"deviceID": device_id})
         items = (payload or {}).get("items", []) if isinstance(payload, dict) else []
-        return [
-            TemplateSummary(
-                template_id=int(item["templateId"]),
-                name=str(item.get("name", "")),
-                page_slot=str(item.get("pageSlot", "unassigned")),
+        summaries = []
+        for item in items:
+            template_type = int(item.get("templateType", 0))
+            sort_order = int(item.get("sortOrder", 0))
+            summaries.append(
+                TemplateSummary(
+                    template_id=int(item["templateId"]),
+                    name=str(item.get("name", "")),
+                    page_slot=sort_order_to_page_slot(sort_order, template_type),
+                    template_type=template_type,
+                )
             )
-            for item in items
-        ]
+        return summaries
 
     async def create_template(self, template: Template) -> int:
         body = {

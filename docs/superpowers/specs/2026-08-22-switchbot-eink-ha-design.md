@@ -130,6 +130,25 @@ pagine custom.
 Mappatura slot → `sortOrder`: `home` → 1 (con `templateType: 1`), `custom1`…`custom4` →
 1…4, qualsiasi altro valore → 0.
 
+La risposta di `list` **non contiene lo slot**: ogni voce ha `sortOrder` e
+`templateType`, e lo slot va ricavato da entrambi. Un item reale, senza i componenti:
+
+```json
+{ "templateId": 580, "name": "Untitled template", "sortOrder": 1, "templateType": 0,
+  "deviceID": "AABBCCDDEEFF", "enabled": true,
+  "createdAt": "2026-07-14T10:55:49Z", "updatedAt": "2026-07-14T10:55:49Z" }
+```
+
+Guardare il solo `sortOrder` non basta: la home e `custom1` hanno entrambe
+`sortOrder: 1` e si distinguono unicamente per `templateType`. Confonderle
+significa sovrascrivere la schermata principale dell'utente. Mappatura inversa:
+`templateType == 1` → `home`; altrimenti `sortOrder` 1…4 → `custom1`…`custom4`;
+tutto il resto → non assegnato.
+
+Creare un template su uno slot già occupato fallisce con
+`191 sortOrder already exists for this device`: sugli slot occupati si aggiorna,
+non si crea.
+
 ### Il canvas
 
 | Proprietà | Valore |
