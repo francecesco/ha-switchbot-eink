@@ -22,6 +22,7 @@ from tests.api.helpers import response_sequence
 
 BASE = "https://wonderlabs.eu.api.switchbot.net/productbiz"
 BASE_US = "https://wonderlabs.us.api.switchbot.net/productbiz"
+DEVICE_BASE = "https://wonderlabs.eu.api.switchbot.net"
 ACCOUNT = "https://account.api.switchbot.net"
 TOKENS = Tokens(access_token="AT", refresh_token="RT", token_type="Bearer")
 
@@ -60,7 +61,7 @@ def test_slot_sconosciuto_ha_sort_order_zero() -> None:
 
 async def test_list_eink_devices_filtra_per_tipo_e_condivisione(aioclient, client) -> None:
     aioclient.post(
-        f"{BASE}/device/v1/manage/getDeviceList",
+        f"{DEVICE_BASE}/device/v1/manage/getDeviceList",
         json={
             "resultCode": 100,
             "data": [
@@ -77,6 +78,20 @@ async def test_list_eink_devices_filtra_per_tipo_e_condivisione(aioclient, clien
     devices = await client.list_eink_devices()
 
     assert [d.device_id for d in devices] == ["A"]
+
+
+async def test_la_lista_dispositivi_non_passa_da_productbiz(aioclient, client) -> None:
+    """Con /productbiz la rotta non esiste e API Gateway risponde 403 parlando di firme AWS."""
+    aioclient.post(
+        f"{DEVICE_BASE}/device/v1/manage/getDeviceList",
+        json={"resultCode": 100, "data": []},
+    )
+
+    await client.list_devices()
+    _method, url, _body, _headers = aioclient.mock_calls[0]
+
+    assert "/productbiz" not in str(url)
+    assert str(url).endswith("/device/v1/manage/getDeviceList")
 
 
 async def test_create_template_invia_sort_order_e_restituisce_id(aioclient, client) -> None:

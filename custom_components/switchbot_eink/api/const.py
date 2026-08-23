@@ -8,7 +8,11 @@ from __future__ import annotations
 from typing import Final
 
 ACCOUNT_BASE_URL: Final = "https://account.api.switchbot.net"
-BACKEND_BASE_TEMPLATE: Final = "https://wonderlabs.{region}.api.switchbot.net/productbiz"
+# Il backend ha due basi diverse: il servizio dispositivi vive sull'host nudo,
+# quello dei template sotto /productbiz. Unificarle produce un 403 di API Gateway
+# che sembra un problema di firma AWS ma e' solo una rotta inesistente.
+WONDERLABS_HOST_TEMPLATE: Final = "https://wonderlabs.{region}.api.switchbot.net"
+PRODUCTBIZ_PATH: Final = "/productbiz"
 
 CLIENT_ID: Final = "pg6fbtxbi7q3o2n4zba852d5lh"
 SERVICE_ID: Final = "weather_station"

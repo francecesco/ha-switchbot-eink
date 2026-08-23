@@ -4,9 +4,10 @@ from __future__ import annotations
 import pytest
 
 from custom_components.switchbot_eink.api.envelope import (
-    backend_base_url,
     build_auth_header,
+    device_base_url,
     normalize_region,
+    productbiz_base_url,
     unwrap_account,
     unwrap_backend,
 )
@@ -45,12 +46,21 @@ def test_normalize_region_rifiuta_una_regione_sconosciuta() -> None:
         normalize_region("xx")
 
 
-def test_backend_base_url_interpola_la_regione() -> None:
-    assert backend_base_url("eu") == "https://wonderlabs.eu.api.switchbot.net/productbiz"
+def test_productbiz_base_url_interpola_la_regione() -> None:
+    assert productbiz_base_url("eu") == "https://wonderlabs.eu.api.switchbot.net/productbiz"
 
 
-def test_backend_base_url_ripiega_su_us_se_la_regione_e_ignota() -> None:
-    assert backend_base_url("xx") == "https://wonderlabs.us.api.switchbot.net/productbiz"
+def test_productbiz_base_url_ripiega_su_us_se_la_regione_e_ignota() -> None:
+    assert productbiz_base_url("xx") == "https://wonderlabs.us.api.switchbot.net/productbiz"
+
+
+def test_device_base_url_non_ha_il_suffisso_productbiz() -> None:
+    """Il servizio dispositivi vive sull'host nudo: con /productbiz la rotta non esiste."""
+    assert device_base_url("eu") == "https://wonderlabs.eu.api.switchbot.net"
+
+
+def test_device_base_url_ripiega_su_us_se_la_regione_e_ignota() -> None:
+    assert device_base_url("xx") == "https://wonderlabs.us.api.switchbot.net"
 
 
 def test_unwrap_backend_restituisce_data_quando_result_code_e_100() -> None:

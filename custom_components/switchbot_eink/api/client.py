@@ -16,7 +16,7 @@ from .const import (
     PATH_TPL_RELEASE,
     PATH_TPL_UPDATE,
 )
-from .envelope import backend_base_url, build_auth_header, unwrap_backend
+from .envelope import build_auth_header, device_base_url, productbiz_base_url, unwrap_backend
 from .http import CanvasHttp
 from .models import Device, Template, TemplateSummary
 
@@ -37,7 +37,14 @@ class SwitchBotCanvasClient:
         self._auth = CanvasAuth(session, region)
         self._http = CanvasHttp(
             session,
-            backend_base_url(region),
+            productbiz_base_url(region),
+            unwrap_backend,
+            auth_provider=self._auth_header,
+            on_unauthorized=self._try_refresh,
+        )
+        self._device_http = CanvasHttp(
+            session,
+            device_base_url(region),
             unwrap_backend,
             auth_provider=self._auth_header,
             on_unauthorized=self._try_refresh,
@@ -63,7 +70,7 @@ class SwitchBotCanvasClient:
         return True
 
     async def list_devices(self) -> list[Device]:
-        payload = await self._http.request(PATH_DEVICE_LIST)
+        payload = await self._device_http.request(PATH_DEVICE_LIST)
         return [Device.from_payload(item) for item in (payload or [])]
 
     async def list_eink_devices(self) -> list[Device]:

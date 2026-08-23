@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .const import BACKEND_BASE_TEMPLATE, DEFAULT_REGION, REGIONS, RESULT_OK
+from .const import DEFAULT_REGION, PRODUCTBIZ_PATH, REGIONS, RESULT_OK, WONDERLABS_HOST_TEMPLATE
 from .errors import SwitchBotCanvasApiError, SwitchBotCanvasAuthError
 
 _BEARER_PREFIX = re.compile(r"^Bearer\s+", re.IGNORECASE)
@@ -29,7 +29,7 @@ def build_auth_header(access_token: str, token_type: str | None, region: str) ->
 def normalize_region(value: str) -> str:
     """Normalizza il nome di una regione, rifiutando quelle sconosciute.
 
-    `backend_base_url` ricade su `us` per qualunque valore non riconosciuto:
+    `device_base_url` e `productbiz_base_url` ricadono su `us` per qualunque valore non riconosciuto:
     è una rete di sicurezza ragionevole per il codice, ma pessima all'ingresso,
     dove un errore di battitura diventerebbe una richiesta al server sbagliato
     con l'header sbagliato, e un 401 che non spiega niente.
@@ -40,11 +40,16 @@ def normalize_region(value: str) -> str:
     return normalized
 
 
-def backend_base_url(region: str) -> str:
-    """URL base del servizio productbiz per la regione data."""
+def device_base_url(region: str) -> str:
+    """Base del servizio dispositivi: l'host nudo, senza /productbiz."""
     if region not in REGIONS:
         region = DEFAULT_REGION
-    return BACKEND_BASE_TEMPLATE.format(region=region)
+    return WONDERLABS_HOST_TEMPLATE.format(region=region)
+
+
+def productbiz_base_url(region: str) -> str:
+    """Base del servizio template, che vive sotto /productbiz."""
+    return f"{device_base_url(region)}{PRODUCTBIZ_PATH}"
 
 
 def unwrap_backend(payload: object) -> Any:
