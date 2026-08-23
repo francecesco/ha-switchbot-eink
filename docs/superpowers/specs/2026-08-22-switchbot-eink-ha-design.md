@@ -390,7 +390,7 @@ lista non e' una griglia, e le sei righe da 62 px sono troppo grosse per righe d
 
 | Elemento | Rettangolo | Corpo |
 |---|---|---|
-| Intestazione `OGGI · sabato 23 agosto` | `[0, 0, 560, 32]` | 24 |
+| Intestazione `OGGI · domenica 23 agosto` | `[0, 0, 560, 32]` | 24 |
 | Filetto | `[0, 34, 560, 2]` | — |
 | Marcatore calendario (evento *i*) | `[0, 44 + 34i, 12, 30]` | 18 |
 | Ora (evento *i*) | `[16, 44 + 34i, 72, 30]`, a destra | 22 |

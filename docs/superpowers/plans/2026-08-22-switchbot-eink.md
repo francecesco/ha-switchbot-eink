@@ -4317,7 +4317,7 @@ def test_la_pagina_finisce_sulla_home() -> None:
 def test_lintestazione_nomina_il_giorno_di_oggi() -> None:
     testi = testi_di(build_agenda_page([evento(9, "Riunione")], ADESSO))
 
-    assert any("OGGI" in t and "sabato 23 agosto" in t for t in testi)
+    assert any("OGGI" in t and "domenica 23 agosto" in t for t in testi)
 
 
 def test_gli_eventi_di_oggi_compaiono_con_ora_e_titolo() -> None:
@@ -4366,8 +4366,8 @@ def test_i_giorni_successivi_stanno_su_una_riga_ciascuno() -> None:
     )
     testi = testi_di(page)
 
-    assert any(t.startswith("DOM 24") and "Dentista" in t for t in testi)
-    assert any(t.startswith("LUN 25") and "Call" in t for t in testi)
+    assert any(t.startswith("LUN 24") and "Dentista" in t for t in testi)
+    assert any(t.startswith("MAR 25") and "Call" in t for t in testi)
 
 
 def test_la_finestra_scarta_quello_che_cade_oltre() -> None:
