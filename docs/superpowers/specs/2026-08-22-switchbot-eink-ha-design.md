@@ -6,12 +6,25 @@
 
 ## Obiettivo
 
-Usare il pannello e-ink da 7.5" come dashboard di stato della casa pilotata da Home
-Assistant: temperature, stato dei dispositivi, consumi, avvisi. Il contenuto meteo
-nativo non interessa e viene sostituito.
+Usare il pannello e-ink da 7.5" come schermo informativo di casa pilotato da Home
+Assistant. Il contenuto meteo nativo non interessa e viene sostituito.
+
+**Contenuto principale: un'agenda** che fonde i calendari di Home Assistant scelti
+dall'utente in un'unica schermata, con oggi in evidenza e i due giorni successivi in
+sintesi.
+
+Questa scelta viene da un vincolo misurato, non da una preferenza: il pannello si
+riconnette e si aggiorna **ogni tre ore** (documentato dal supporto SwitchBot, e
+coerente con le nostre prove sul campo). Uno stato dei dispositivi vecchio fino a tre
+ore sarebbe peggio di nessuno stato; un'agenda, che cambia lentamente, regge benissimo
+quella cadenza. Chi vuole il dato adesso tiene premuto due secondi il pulsante.
+
+Resta possibile comporre a mano pagine con card di stato, temperature e consumi: il
+compilatore le supporta. L'agenda e' il contenuto predefinito, non l'unico.
 
 Non-obiettivi: sostituire il firmware, funzionare senza cloud SwitchBot, controllare
-dispositivi dal pannello.
+dispositivi dal pannello, mostrare stati che cambiano piu' in fretta di quanto il
+pannello sappia leggerli.
 
 ## Vincolo di partenza
 
@@ -258,6 +271,7 @@ custom_components/switchbot_eink/
 │   ├── schema.py       validazione della definizione YAML (voluptuous)
 │   ├── grid.py         griglia 12x6 → pixel
 │   ├── widgets.py      card astratte → wire format, con whitelist di stile
+│   ├── agenda.py       eventi di calendario → definizione di pagina
 │   └── compile.py      entry point: definizione + stati → lista componenti
 ├── config_flow.py  strato 3
 ├── coordinator.py
@@ -339,16 +353,103 @@ motore di template di Home Assistant, quindi Jinja è disponibile ovunque.
 Il compilatore valida che nessuna card esca dall'area utile e che due card non si
 sovrappongano, segnalando l'errore in fase di setup invece di produrre un canvas rotto.
 
+### Strato 2b — generatore dell'agenda
+
+L'agenda non e' un tipo di card nuovo: e' un **generatore** che produce la stessa
+struttura di pagina che lo schema gia' valida e che il compilatore gia' sa tradurre.
+Nessun percorso parallelo, nessuna duplicazione della validazione.
+
+```
+eventi dai calendari HA  ->  build_agenda_page()  ->  definizione di pagina
+                                                       -> validate_page -> compile_page
+```
+
+Vive in `layout/agenda.py` ed e' puro come il resto dello strato: niente import di Home
+Assistant, niente import di `api/`. Riceve dataclass proprie, non oggetti di HA.
+
+**Origine dei dati.** L'integrazione chiama il servizio `calendar.get_events` con
+`return_response=True`, passando le entita' scelte e la finestra temporale. E' l'unico
+modo supportato per leggere i calendari dall'esterno del loro componente.
+
+**Modello dell'evento.** Una dataclass immutabile:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Event:
+    start: datetime
+    end: datetime
+    summary: str
+    all_day: bool
+    calendar: str      # nome amichevole dell'entita' di origine
+```
+
+**Finestra.** Tre giorni: oggi e i due successivi.
+
+**Impaginazione**, in coordinate dell'area utile (560 × 380), tramite `position`: una
+lista non e' una griglia, e le sei righe da 62 px sono troppo grosse per righe da 34.
+
+| Elemento | Rettangolo | Corpo |
+|---|---|---|
+| Intestazione `OGGI · sabato 23 agosto` | `[0, 0, 560, 32]` | 24 |
+| Filetto | `[0, 34, 560, 2]` | — |
+| Marcatore calendario (evento *i*) | `[0, 44 + 34i, 12, 30]` | 18 |
+| Ora (evento *i*) | `[16, 44 + 34i, 72, 30]`, a destra | 22 |
+| Titolo (evento *i*) | `[96, 44 + 34i, 464, 30]` | 22 |
+| `+N altri` | `[360, 248, 200, 24]`, a destra | 16 |
+| Filetto | `[0, 278, 560, 2]` | — |
+| Giorno successivo 1 | `[0, 288, 560, 28]` | 16 |
+| Giorno successivo 2 | `[0, 318, 560, 28]` | 16 |
+| `agg. HH:MM` | `[360, 352, 200, 22]`, a destra | 13 |
+
+Oggi ospita **al massimo sei eventi**. Il settimo e successivi diventano la riga
+`+N altri`: dire che c'e' dell'altro e' meglio che farlo sparire in silenzio.
+
+**Riga di aggiornamento.** L'ora dell'ultima pubblicazione, in basso a destra, non e' un
+ornamento: con una cadenza di lettura di tre ore lo schermo puo' mostrare dati vecchi, e
+senza quella riga chi guarda non ha modo di distinguere un'agenda fresca da una di
+stamattina. Uno schermo vecchio deve restare leggibile *come* vecchio.
+
+**Troncamento.** I titoli che eccedono la larghezza vengono tagliati e chiusi con `…`.
+La larghezza disponibile in caratteri si stima come `larghezza_px / (CHAR_WIDTH_RATIO *
+corpo)`, con `CHAR_WIDTH_RATIO = 0.52` — una costante unica, dichiaratamente
+approssimativa, da tarare con una prova sul pannello. Il valore vive in un posto solo
+proprio perche' e' da tarare.
+
+**Piu' calendari.** Quando l'utente ne seleziona piu' di uno, gli eventi si fondono in
+ordine cronologico e ciascuno porta un marcatore di **al massimo due caratteri**,
+derivato dal nome del calendario: iniziale maiuscola, estesa a due lettere in caso di
+collisione, e a una cifra progressiva se ancora ambigua. La derivazione e' deterministica
+e testabile. Con un solo calendario il marcatore non compare e i 16 px tornano al titolo.
+
+Il marcatore e' testuale e non cromatico perche' il pannello offre solo `black`, `white`,
+`gray` e `transparent`: due tonalita' utili per il testo non bastano a distinguere piu'
+di due calendari.
+
+**Stato vuoto.** Nessun evento nella finestra produce una riga sola, centrata: `Nessun
+evento nei prossimi 3 giorni`. Uno schermo vuoto deve sembrare una risposta, non un
+guasto.
+
 ### Strato 3 — integrazione Home Assistant
 
 **Config flow.** Chiede email, password e regione; fa il login, elenca i dispositivi
 `W1070000`, fa scegliere quale. Persiste `refresh_token`, `user_id`, `device_id`,
 `region` — **non la password**. Se il refresh token viene revocato, parte un reauth flow.
 
+**Opzioni.** Due voci: quali calendari mostrare — scelta multipla fra le entità
+`calendar.*` esistenti — e ogni quanto ripubblicare. Cambiarle ricarica la entry, senza
+riavviare Home Assistant.
+
 **Coordinator.** `DataUpdateCoordinator` con `update_interval` configurabile dalle
-opzioni (default 15 minuti). Ad ogni ciclo: renderizza i template, compila i componenti,
-calcola un hash stabile della lista. Se l'hash è identico all'ultimo pubblicato, non
+opzioni (default 15 minuti). Ad ogni ciclo: legge gli eventi dei calendari scelti con
+`calendar.get_events`, genera la pagina con `build_agenda_page`, la valida, la compila,
+e calcola un hash stabile della lista. Se l'hash è identico all'ultimo pubblicato, non
 chiama niente. Altrimenti `update_template` seguito da `release`.
+
+**Perché ripubblicare più spesso di quanto il pannello legga.** Il pannello si sveglia
+ogni tre ore e prende ciò che trova sul server in quell'istante. Pubblicare ogni 15
+minuti significa che al risveglio trova dati vecchi al massimo di 15 minuti; pubblicare
+ogni tre ore significa fino a tre ore. Allineare la pubblicazione alla cadenza di lettura
+sarebbe quindi un errore, non un'ottimizzazione.
 
 L'hash evita di bruciare chiamate quando nulla è cambiato. Sull'API privata non c'è un
 rate limit documentato; la OpenAPI pubblica raccomanda di non superare una chiamata al
@@ -367,16 +468,16 @@ invece che solo nei log.
 
 ## Rischi
 
-**La cadenza di aggiornamento del dispositivo non è nota.** La documentazione SwitchBot
-dice: *"Canvas pushed to backend. Long-press the device button 2s to refresh now."* Il
-"now" lascia intendere che esista comunque un polling periodico — è un e-ink a batteria,
-sarebbe strano il contrario — ma non è confermato. Se il pannello si aggiornasse solo
-alla pressione del pulsante, il progetto perderebbe gran parte del suo valore.
+**~~La cadenza di aggiornamento del dispositivo non è nota.~~ Risolto: tre ore.** Il
+supporto SwitchBot documenta che il pannello si riconnette e aggiorna i dati **ogni tre
+ore**, con la pressione lunga del pulsante come aggiornamento immediato. La misura sul
+campo è coerente: con un contenuto nuovo sul server, dopo dieci minuti il pannello
+mostrava ancora quello vecchio. Il campo `refresh` del componente (`"1h"`, `"5m"`) viene
+conservato dal backend ma non risulta influenzare la cadenza del dispositivo.
 
-Mitigazione: **è il primo task del piano di implementazione**, prima di scrivere
-l'integrazione. Si pubblica un template con un timestamp, si lascia il dispositivo
-fermo, e si misura ogni quanto il timestamp cambia da solo. Il risultato determina il
-default di `update_interval` e, nel caso peggiore, fa riconsiderare l'intero approccio.
+Conseguenza, ed è la ragione della scelta di contenuto: uno stato dei dispositivi vecchio
+fino a tre ore sarebbe fuorviante, un'agenda no. Il rischio non è stato eliminato — è
+stato assorbito scegliendo un contenuto che lo tollera.
 
 **L'API è privata e non documentata.** Può cambiare o essere chiusa senza preavviso.
 Mitigazione: confinata nello strato 1, con test che documentano il formato atteso.
