@@ -22,6 +22,7 @@ CONF_DEVICE_NAME: Final = "device_name"
 CONF_TEMPLATE_ID: Final = "template_id"
 CONF_PAGE_SLOT: Final = "page_slot"
 CONF_UPDATE_INTERVAL: Final = "update_interval"
+CONF_CALENDARS: Final = "calendars"
 
 # Da allineare alla cadenza misurata sul dispositivo (Task 5).
 DEFAULT_UPDATE_INTERVAL: Final = 900  # secondi

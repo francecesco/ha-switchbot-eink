@@ -15,6 +15,7 @@ from custom_components.switchbot_eink.api.errors import (
 )
 from custom_components.switchbot_eink.api.models import Device
 from custom_components.switchbot_eink.const import (
+    CONF_CALENDARS,
     CONF_DEVICE_ID,
     CONF_REFRESH_TOKEN,
     CONF_REGION,
@@ -524,3 +525,42 @@ async def test_le_opzioni_valide_finiscono_nella_entry(hass: HomeAssistant) -> N
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_UPDATE_INTERVAL] == 300
+
+
+async def test_i_calendari_scelti_finiscono_nella_entry(hass: HomeAssistant) -> None:
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    entry = MockConfigEntry(domain=DOMAIN, unique_id="DEV1", data={})
+    entry.add_to_hass(hass)
+    hass.states.async_set("calendar.lavoro", "on")
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_UPDATE_INTERVAL: 300, CONF_CALENDARS: ["calendar.lavoro"]},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_CALENDARS] == ["calendar.lavoro"]
+
+
+async def test_i_calendari_scelti_restano_offerti_come_default(
+    hass: HomeAssistant,
+) -> None:
+    """Riaprendo le opzioni, la selezione precedente non deve svuotarsi."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="DEV1",
+        data={},
+        options={CONF_UPDATE_INTERVAL: 300, CONF_CALENDARS: ["calendar.lavoro"]},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    chiave = next(
+        k for k in result["data_schema"].schema if k == CONF_CALENDARS
+    )
+    assert chiave.default() == ["calendar.lavoro"]

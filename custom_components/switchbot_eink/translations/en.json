@@ -41,7 +41,8 @@
       "init": {
         "title": "Update interval",
         "data": {
-          "update_interval": "Seconds between publishes"
+          "update_interval": "Seconds between publishes",
+          "calendars": "Calendars to show"
         }
       }
     }

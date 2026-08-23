@@ -14,6 +14,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api.auth import CanvasAuth, Tokens
@@ -24,6 +25,7 @@ from .api.errors import SwitchBotCanvasAuthError, SwitchBotCanvasError
 from .api.models import Device
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_CALENDARS,
     CONF_DEVICE_ID,
     CONF_DEVICE_NAME,
     CONF_REFRESH_TOKEN,
@@ -245,7 +247,13 @@ class SwitchBotEinkOptionsFlow(OptionsFlow):
                 {
                     vol.Required(CONF_UPDATE_INTERVAL, default=attuale): vol.All(
                         vol.Coerce(int), vol.Range(min=MIN_PUBLISH_INTERVAL)
-                    )
+                    ),
+                    vol.Optional(
+                        CONF_CALENDARS,
+                        default=self.config_entry.options.get(CONF_CALENDARS, []),
+                    ): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="calendar", multiple=True)
+                    ),
                 }
             ),
         )

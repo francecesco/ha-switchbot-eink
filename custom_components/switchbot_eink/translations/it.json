@@ -41,7 +41,8 @@
       "init": {
         "title": "Intervallo di aggiornamento",
         "data": {
-          "update_interval": "Secondi fra una pubblicazione e l'altra"
+          "update_interval": "Secondi fra una pubblicazione e l'altra",
+          "calendars": "Calendari da mostrare"
         }
       }
     }
