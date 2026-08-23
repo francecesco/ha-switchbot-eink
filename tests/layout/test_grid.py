@@ -4,9 +4,13 @@ from __future__ import annotations
 import pytest
 
 from custom_components.switchbot_eink.layout.const import (
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT,
     GRID_COLS,
     GRID_ROWS,
     USABLE_HEIGHT,
+    USABLE_LEFT,
+    USABLE_TOP,
     USABLE_WIDTH,
 )
 from custom_components.switchbot_eink.layout.grid import (
@@ -14,6 +18,7 @@ from custom_components.switchbot_eink.layout.grid import (
     grid_to_rect,
     rect_fits,
     rects_overlap,
+    to_canvas,
 )
 
 
@@ -31,8 +36,8 @@ def test_span_completo_riempie_l_area_utile() -> None:
     assert rect.h == USABLE_HEIGHT
 
 
-def test_tre_colonne_larghe_194_pixel() -> None:
-    assert grid_to_rect(0, 0, 3, 1).w == 194
+def test_tre_colonne_larghe_134_pixel() -> None:
+    assert grid_to_rect(0, 0, 3, 1).w == 134
 
 
 def test_la_quarta_colonna_inizia_dopo_la_gutter() -> None:
@@ -65,7 +70,7 @@ def test_span_nullo_solleva() -> None:
 
 
 def test_rect_dentro_l_area_utile_ci_sta() -> None:
-    assert rect_fits(Rect(0, 0, 800, 372)) is True
+    assert rect_fits(Rect(0, 0, 560, 380)) is True
 
 
 def test_rect_che_sborda_a_destra_non_ci_sta() -> None:
@@ -127,3 +132,27 @@ def test_uno_span_copre_esattamente_le_celle_che_attraversa() -> None:
 
             assert span.x == prima.x, f"span da {col} largo {span_w}"
             assert span.x + span.w == ultima.x + ultima.w, f"span da {col} largo {span_w}"
+
+
+def test_la_griglia_piena_copre_esattamente_larea_utile() -> None:
+    rect = grid_to_rect(0, 0, GRID_COLS, GRID_ROWS)
+
+    assert (rect.x, rect.y) == (0, 0)
+    assert (rect.w, rect.h) == (USABLE_WIDTH, USABLE_HEIGHT)
+
+
+def test_to_canvas_sposta_a_destra_della_barra_laterale() -> None:
+    """La barra laterale del firmware occupa i primi 240 px: un rettangolo
+    tradotto non deve mai cominciare prima."""
+    tradotto = to_canvas(Rect(0, 0, 100, 50))
+
+    assert tradotto.x == USABLE_LEFT
+    assert tradotto.y == USABLE_TOP
+    assert (tradotto.w, tradotto.h) == (100, 50)
+
+
+def test_to_canvas_non_fa_uscire_dal_pannello_la_griglia_piena() -> None:
+    tradotto = to_canvas(grid_to_rect(0, 0, GRID_COLS, GRID_ROWS))
+
+    assert tradotto.x + tradotto.w <= CANVAS_WIDTH
+    assert tradotto.y + tradotto.h <= CANVAS_HEIGHT

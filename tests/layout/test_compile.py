@@ -11,6 +11,7 @@ from custom_components.switchbot_eink.layout.compile import (
     compile_page,
     components_hash,
 )
+from custom_components.switchbot_eink.layout.const import USABLE_LEFT
 from custom_components.switchbot_eink.layout.schema import validate_page
 
 STATI = {
@@ -163,6 +164,9 @@ def test_i_campi_testuali_passano_dal_renderer() -> None:
 
 
 def test_position_in_pixel_usata_cosi_com_e() -> None:
+    """La position e' nello spazio dell'area utile: il compilatore la traduce
+    in coordinate fisiche del pannello spostandola a destra della barra
+    laterale, ma dimensioni e y non cambiano."""
     componenti = compila(
         {
             "page": "custom1",
@@ -171,7 +175,7 @@ def test_position_in_pixel_usata_cosi_com_e() -> None:
     )
 
     css = json.loads(componenti[0]["css"])
-    assert (css["x"], css["y"], css["w"], css["h"]) == (100, 50, 300, 40)
+    assert (css["x"], css["y"], css["w"], css["h"]) == (100 + USABLE_LEFT, 50, 300, 40)
 
 
 def test_position_fuori_dall_area_utile_solleva() -> None:
@@ -276,8 +280,23 @@ def test_sovrapposizione_fra_card_non_adiacenti_viene_rilevata() -> None:
                 "page": "custom1",
                 "cards": [
                     {"type": "text", "text": "a", "position": [0, 0, 200, 100]},
-                    {"type": "text", "text": "b", "position": [400, 0, 200, 100]},
+                    {"type": "text", "text": "b", "position": [350, 0, 200, 100]},
                     {"type": "text", "text": "c", "position": [100, 50, 200, 100]},
                 ],
             }
         )
+
+
+def test_i_componenti_compilati_stanno_a_destra_della_barra_laterale() -> None:
+    """Regressione: la spec dichiarava l'area utile a partire da x=0, e con quei
+    numeri la colonna di sinistra di ogni pagina finiva sotto la barra del
+    firmware, invisibile."""
+    componenti = compila(
+        {
+            "page": "custom1",
+            "cards": [{"type": "text", "text": "ciao", "grid": [0, 0, 3, 1]}],
+        }
+    )
+
+    css = json.loads(componenti[0]["css"])
+    assert css["x"] >= USABLE_LEFT

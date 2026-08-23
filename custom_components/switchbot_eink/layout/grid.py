@@ -8,6 +8,8 @@ from .const import (
     GRID_COLS,
     GRID_ROWS,
     USABLE_HEIGHT,
+    USABLE_LEFT,
+    USABLE_TOP,
     USABLE_WIDTH,
 )
 
@@ -88,4 +90,16 @@ def rects_overlap(a: Rect, b: Rect) -> bool:
     """Vero se i due rettangoli si intersecano. Il contatto sul bordo non conta."""
     return not (
         a.x + a.w <= b.x or b.x + b.w <= a.x or a.y + a.h <= b.y or b.y + b.h <= a.y
+    )
+
+
+def to_canvas(rect: Rect) -> Rect:
+    """Traduce un rettangolo dall'area utile alle coordinate fisiche del pannello.
+
+    E' l'unico punto del progetto che sa dove l'area utile comincia. Tutto il
+    resto dello strato `layout` ragiona con origine in (0, 0), cosi' chi scrive
+    una pagina non deve sapere che esiste una barra laterale.
+    """
+    return Rect(
+        x=rect.x + USABLE_LEFT, y=rect.y + USABLE_TOP, w=rect.w, h=rect.h
     )

@@ -1,7 +1,12 @@
 """Geometria del pannello e inventario dei widget.
 
-I valori vengono dal renderer dell'editor web: il pannello `eink-7in3` è
-800×480 con una status bar di 64px in alto e 44px in basso.
+Il pannello `eink-7in3` e' 800x480, ma non e' tutto nostro: il firmware disegna
+una barra verticale a sinistra, larga 240 px, con data, ora e meteo. Sopra non
+c'e' nessuna fascia riservata, e in basso il contenuto si ferma a 380.
+
+Questi numeri sono **misurati sul dispositivo**, non dedotti dal bundle web: i
+valori `safeTop: 64` / `safeBottom: 44` che il renderer web dichiara descrivono
+una geometria diversa e per questo pannello sono sbagliati.
 """
 from __future__ import annotations
 
@@ -9,11 +14,16 @@ from typing import Final
 
 CANVAS_WIDTH: Final = 800
 CANVAS_HEIGHT: Final = 480
-SAFE_TOP: Final = 64
-SAFE_BOTTOM: Final = 44
 
-USABLE_WIDTH: Final = CANVAS_WIDTH
-USABLE_HEIGHT: Final = CANVAS_HEIGHT - SAFE_TOP - SAFE_BOTTOM  # 372
+# Barra di stato del firmware: verticale, a sinistra. Non ci si puo' scrivere.
+SIDEBAR_WIDTH: Final = 240
+
+# Origine dell'area utile in coordinate fisiche del pannello.
+USABLE_LEFT: Final = SIDEBAR_WIDTH
+USABLE_TOP: Final = 0
+
+USABLE_WIDTH: Final = CANVAS_WIDTH - SIDEBAR_WIDTH  # 560
+USABLE_HEIGHT: Final = 380
 
 GRID_COLS: Final = 12
 GRID_ROWS: Final = 6

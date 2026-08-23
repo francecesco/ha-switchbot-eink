@@ -11,7 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from .grid import Rect, grid_to_rect, rect_fits, rects_overlap
+from .const import USABLE_HEIGHT, USABLE_WIDTH
+from .grid import Rect, grid_to_rect, rect_fits, rects_overlap, to_canvas
 from .widgets import to_wire
 
 VALORE_ASSENTE = "—"
@@ -112,7 +113,8 @@ def compile_page(
 
         if not rect_fits(rect):
             raise LayoutError(
-                f"card {index}: il rettangolo {rect} esce dall'area utile 800x372"
+                f"card {index}: il rettangolo {rect} esce dall'area utile "
+                f"{USABLE_WIDTH}x{USABLE_HEIGHT}"
             )
 
         for altro_index, altro_rect in rettangoli:
@@ -129,7 +131,7 @@ def compile_page(
                 component_id=str(index + 1),
                 widget_type=widget_type,
                 name=f"{page['name']} #{index + 1}",
-                rect=rect,
+                rect=to_canvas(rect),
                 content=_content_for(card, render, resolve),
                 style=card.get("style", {}),
                 z=card.get("z", 1),
