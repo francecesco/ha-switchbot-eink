@@ -200,6 +200,12 @@ async def test_unload_invoca_async_unload_platforms(hass: HomeAssistant, entry) 
     nucleo di Home Assistant registra ed esegue a prescindere dal corpo di
     questa funzione. L'unico modo per osservare che rilascia davvero le
     risorse (oggi un no-op, domani no) e' verificare che la chiamata avvenga.
+
+    Nota: con `PLATFORMS` vuoto questo test verifica la meccanica (la
+    chiamata avviene) e non il comportamento (qualcosa viene davvero
+    rilasciato) — tornera' a essere un test di comportamento vero quando un
+    task futuro aggiungera' le entita' diagnostiche e quindi delle
+    piattaforme reali da scaricare.
     """
     entry.add_to_hass(hass)
 
@@ -239,3 +245,88 @@ async def test_il_token_type_non_ignorato_nella_costruzione_del_client(
 
     tokens_usati = client_cls.call_args.args[2]
     assert tokens_usati.token_type == "Custom"
+
+
+def test_manifest_dichiara_la_dipendenza_dal_calendario() -> None:
+    """Senza `after_dependencies: [calendar]`, all'avvio possiamo essere
+    caricati prima che le entita' di calendario esistano: `_eventi()`
+    le troverebbe tutte assenti e scarterebbe ogni calendario scelto."""
+    import json
+    from pathlib import Path
+
+    manifest_path = (
+        Path(__file__).resolve().parents[2]
+        / "custom_components"
+        / "switchbot_eink"
+        / "manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text())
+
+    assert "calendar" in manifest.get("after_dependencies", [])
+
+
+async def test_l_ascoltatore_finto_e_registrato_per_essere_rimosso_allo_unload(
+    hass: HomeAssistant, entry
+) -> None:
+    """`async_add_listener` ritorna una funzione per rimuovere l'ascoltatore:
+    va passata a `entry.async_on_unload`, altrimenti resta agganciata per
+    sempre all'istanza del coordinator anche dopo lo scarico della entry.
+
+    Verificato empiricamente che con `config_entry=entry` passato alla classe
+    base, `DataUpdateCoordinator` registra gia' da solo `async_shutdown` come
+    callback di unload (cancella comunque il timer), quindi un test che
+    guardi solo "il coordinator ripubblica dopo lo unload?" non discrimina
+    questa mutazione — e' rimasta cosi' anche dopo la rimozione del wrap.
+    L'unico modo per osservarla e' verificare che la registrazione avvenga:
+    `entry.async_on_unload` viene chiamato tre volte durante il setup — una
+    volta dalla stessa classe base (`DataUpdateCoordinator.__init__` registra
+    `self.async_shutdown` non appena riceve `config_entry=entry`), una per
+    l'ascoltatore finto, una per il listener di ricarica delle opzioni.
+    """
+    entry.add_to_hass(hass)
+
+    with patch(PERCORSO_CLIENT) as client_cls:
+        _mock_client(client_cls)
+        with patch(PERCORSO_PUBLISH, AsyncMock(return_value=True)):
+            with patch.object(
+                entry, "async_on_unload", wraps=entry.async_on_unload
+            ) as on_unload_spia:
+                assert await hass.config_entries.async_setup(entry.entry_id)
+                await hass.async_block_till_done()
+
+    assert on_unload_spia.call_count == 3
+
+
+async def test_dopo_lo_unload_il_coordinator_non_pubblica_piu(
+    hass: HomeAssistant, freezer
+) -> None:
+    """Copertura di comportamento, in aggiunta al test sulla registrazione
+    sopra: oggi vale grazie ad `async_shutdown` (registrato automaticamente
+    dalla classe base), non grazie a questo specifico ascoltatore — ma resta
+    la proprieta' osservabile che conta per l'utente."""
+    freezer.move_to("2026-08-23T12:00:00+00:00")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="DEV1",
+        data=dict(DATI),
+        options={CONF_UPDATE_INTERVAL: 60},
+    )
+    entry.add_to_hass(hass)
+
+    publish_mock = AsyncMock(return_value=True)
+    with patch(PERCORSO_CLIENT) as client_cls:
+        _mock_client(client_cls)
+        with patch(PERCORSO_PUBLISH, publish_mock):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+            assert await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+
+            conteggio_dopo_unload = publish_mock.await_count
+            for _ in range(3):
+                freezer.tick(timedelta(seconds=60))
+                async_fire_time_changed(hass, dt_util.utcnow())
+                await hass.async_block_till_done()
+
+    assert publish_mock.await_count == conteggio_dopo_unload

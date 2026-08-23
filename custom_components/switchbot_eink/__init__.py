@@ -76,7 +76,12 @@ async def _ricarica_su_cambio_opzioni(
     sono davvero diverse da quelle con cui il coordinator attuale e' stato
     creato.
     """
-    coordinator = entry.runtime_data
+    # Il nucleo cancella `runtime_data` allo unload mentre i listener girano
+    # come task differiti: getattr con default chiude la finestra teorica in
+    # cui questo listener venisse eseguito dopo che la entry e' gia' scaricata.
+    coordinator = getattr(entry, "runtime_data", None)
+    if coordinator is None:
+        return
     if dict(entry.options) == coordinator.opzioni_iniziali:
         return
     _LOGGER.debug("Opzioni cambiate, ricarico la entry %s", entry.entry_id)

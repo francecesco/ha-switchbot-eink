@@ -6,6 +6,7 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import voluptuous as vol
 from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -30,8 +31,10 @@ from custom_components.switchbot_eink.const import (
     MIN_PUBLISH_INTERVAL,
 )
 from custom_components.switchbot_eink.coordinator import SwitchBotEinkCoordinator
-from custom_components.switchbot_eink.layout.agenda import FINESTRA_GIORNI
-from custom_components.switchbot_eink.layout.schema import validate_page
+from custom_components.switchbot_eink.layout.agenda import (
+    FINESTRA_GIORNI,
+    build_agenda_page,
+)
 
 TOKENS = Tokens(access_token="AT", refresh_token="RT", token_type="Bearer")
 
@@ -234,6 +237,25 @@ async def test_force_distanziati_pubblicano_entrambi(
     client.release.assert_awaited_once()
 
 
+async def test_un_intervallo_di_esattamente_60_secondi_e_ammesso(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """Il confine e' incluso nel permesso: "minimo 60 secondi" vuol dire che
+    60 bastano, non che ne servono 61. Un `<=` al posto del `<` bloccherebbe
+    proprio questo caso."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    assert await coordinatore.async_publish(force=True) is True
+    client.release.reset_mock()
+    freezer.tick(timedelta(seconds=MIN_PUBLISH_INTERVAL))
+
+    assert await coordinatore.async_publish(force=True) is True
+    client.release.assert_awaited_once()
+
+
 async def test_last_published_viene_aggiornato(
     hass: HomeAssistant, entry, client, freezer
 ) -> None:
@@ -253,25 +275,55 @@ def test_config_entry_e_passato_alla_classe_base(coordinator, entry) -> None:
     assert coordinator.config_entry is entry
 
 
-async def test_validate_page_viene_chiamata_prima_di_compilare(
+def test_forget_template_id_ripulisce_anche_entry_data(coordinator, entry) -> None:
+    """Dimenticarlo solo in memoria (`coordinator._template_id`) e non anche
+    nella entry persistita significa ritrovarselo al prossimo riavvio."""
+    assert entry.data[CONF_TEMPLATE_ID] == 77  # dalla fixture
+
+    coordinator._forget_template_id()
+
+    assert coordinator._template_id is None
+    assert CONF_TEMPLATE_ID not in entry.data
+
+
+def _agenda_con_la_pagina_reale_rotta(*args, **kwargs):
+    """Come `build_agenda_page`, ma rompe solo la pagina che verrebbe
+    pubblicata (`stamp` assente o True), lasciando intatta quella di
+    confronto (`stamp=False`).
+
+    Serve a verificare che `validate_page` sia davvero sul percorso della
+    pagina pubblicata: un conteggio delle chiamate (`call_count == 2`) e'
+    fragile, si rompe alla prima rifattorizzazione innocua che aggiunga o
+    tolga una chiamata. Un comportamento osservabile — la scrittura non deve
+    avvenire se la pagina reale e' invalida — non dipende da quante volte la
+    funzione e' chiamata.
+    """
+    pagina = build_agenda_page(*args, **kwargs)
+    if kwargs.get("stamp", True):
+        pagina["cards"].append({"type": "non-esiste-questo-tipo-di-card"})
+    return pagina
+
+
+async def test_una_pagina_pubblicata_invalida_impedisce_la_scrittura(
     hass: HomeAssistant, entry, client, freezer
 ) -> None:
-    """Va chiamata due volte: sulla pagina di confronto (senza stamp) e su
-    quella vera che finisce a `compile_page`. Verificare solo `.called`
-    lascerebbe sopravvivere la rimozione di una delle due chiamate, perche'
-    l'altra basterebbe a farlo scattare comunque."""
+    """Se `validate_page` non venisse chiamata sulla pagina reale prima di
+    compilarla, una card invalida (qui: un tipo inesistente) arriverebbe
+    intatta a `compile_page` invece di far fallire subito `async_publish`."""
     freezer.move_to(ADESSO_UTC)
     entry.add_to_hass(hass)
     _con_un_evento(hass)
     coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
 
     with patch(
-        "custom_components.switchbot_eink.coordinator.validate_page",
-        wraps=validate_page,
-    ) as spia:
-        await coordinatore.async_publish()
+        "custom_components.switchbot_eink.coordinator.build_agenda_page",
+        side_effect=_agenda_con_la_pagina_reale_rotta,
+    ):
+        with pytest.raises(vol.Invalid):
+            await coordinatore.async_publish()
 
-    assert spia.call_count == 2
+    client.update_template.assert_not_awaited()
+    client.release.assert_not_awaited()
 
 
 # ---- creazione/riuso/recupero del template ---------------------------------
@@ -318,17 +370,26 @@ async def test_riusa_un_template_gia_presente_sullo_slot(
     assert entry.data[CONF_TEMPLATE_ID] == 55
 
 
+# Il codice vero con cui il backend segnala "template non esiste piu'" non e'
+# documentato (l'API e' privata). 150 e' solo un rappresentante illustrativo
+# di "codice applicativo positivo sotto 400": qualunque valore in quella fascia
+# esercita la stessa logica in `_forse_template_sparito`.
+CODICE_APPLICATIVO_TEMPLATE_SPARITO = 150
+
+
 async def test_il_template_cancellato_dall_app_viene_ricreato(
     hass: HomeAssistant, entry, client, freezer
 ) -> None:
-    """Se il backend rifiuta l'update perche' il template non c'e' piu' (un
-    utente puo' cancellarlo dall'app SwitchBot), un solo tentativo di
-    recupero: dimenticare l'id e ripartire da list/create."""
+    """Se il backend rifiuta l'update con un codice applicativo (0 < codice <
+    400) e lo slot risulta davvero vuoto rileggendo la lista, un solo
+    tentativo di recupero: dimenticare l'id e ripartire da list/create."""
     freezer.move_to(ADESSO_UTC)
     entry.add_to_hass(hass)  # CONF_TEMPLATE_ID = 77, ora invalido sul backend
     _con_un_evento(hass)
     client.update_template = AsyncMock(
-        side_effect=SwitchBotCanvasApiError(190001, "template not exist")
+        side_effect=SwitchBotCanvasApiError(
+            CODICE_APPLICATIVO_TEMPLATE_SPARITO, "template not exist"
+        )
     )
     client.list_templates = AsyncMock(return_value=[])  # lo slot e' davvero vuoto
     client.create_template = AsyncMock(return_value=999)
@@ -337,6 +398,125 @@ async def test_il_template_cancellato_dall_app_viene_ricreato(
     assert await coordinatore.async_publish() is True
 
     client.create_template.assert_awaited_once()
+    assert entry.data[CONF_TEMPLATE_ID] == 999
+
+
+async def test_errore_di_rete_non_tenta_il_recupero(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """Codice 0: e' l'involucro di `api/http.py` per un errore di trasporto,
+    non dice niente sul template. Recuperare qui cancellerebbe un
+    `template_id` valido per un guasto che non lo riguarda."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(
+        side_effect=SwitchBotCanvasApiError(0, "Errore di rete: boom")
+    )
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    with pytest.raises(UpdateFailed):
+        await coordinatore.async_publish()
+
+    client.list_templates.assert_not_awaited()
+    client.create_template.assert_not_awaited()
+    assert entry.data[CONF_TEMPLATE_ID] == 77
+
+
+async def test_errore_429_non_tenta_il_recupero(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """429 e' uno stato HTTP (>= 400): il backend sta chiedendo di rallentare,
+    non sta dicendo che il template e' sparito. Recuperare qui raddoppierebbe
+    le chiamate proprio quando serve il contrario."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(side_effect=SwitchBotCanvasApiError(429, "HTTP 429"))
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    with pytest.raises(UpdateFailed):
+        await coordinatore.async_publish()
+
+    client.list_templates.assert_not_awaited()
+    client.create_template.assert_not_awaited()
+    assert entry.data[CONF_TEMPLATE_ID] == 77
+
+
+async def test_recupero_con_list_templates_che_fallisce_non_crea(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """Il secondo cancello: se anche `list_templates` fallisce, non si crea
+    al buio. L'eccezione risale cosi' com'e' e si riprova al ciclo dopo."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(
+        side_effect=SwitchBotCanvasApiError(
+            CODICE_APPLICATIVO_TEMPLATE_SPARITO, "boh"
+        )
+    )
+    client.list_templates = AsyncMock(
+        side_effect=SwitchBotCanvasApiError(0, "Errore di rete: boom")
+    )
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    with pytest.raises(UpdateFailed):
+        await coordinatore.async_publish()
+
+    client.create_template.assert_not_awaited()
+
+
+async def test_recupero_con_template_ancora_presente_non_crea(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """Se il template rifiutato dall'update e' ancora nella lista, non era
+    sparito: l'errore era un altro, e va rilanciato com'era."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)  # CONF_TEMPLATE_ID = 77
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(
+        side_effect=SwitchBotCanvasApiError(
+            CODICE_APPLICATIVO_TEMPLATE_SPARITO, "boh"
+        )
+    )
+    client.list_templates = AsyncMock(
+        return_value=[TemplateSummary(template_id=77, name="Agenda", page_slot="home")]
+    )
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    with pytest.raises(UpdateFailed):
+        await coordinatore.async_publish()
+
+    client.create_template.assert_not_awaited()
+    assert entry.data[CONF_TEMPLATE_ID] == 77
+
+
+async def test_recupero_con_altro_template_sullo_slot_lo_riusa(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """Il template rifiutato non c'e' piu', ma un altro occupa gia' lo slot:
+    va riusato, non creato un duplicato."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)  # CONF_TEMPLATE_ID = 77
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(
+        side_effect=[
+            SwitchBotCanvasApiError(CODICE_APPLICATIVO_TEMPLATE_SPARITO, "boh"),
+            None,
+        ]
+    )
+    client.list_templates = AsyncMock(
+        return_value=[TemplateSummary(template_id=999, name="Altro", page_slot="home")]
+    )
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    assert await coordinatore.async_publish() is True
+
+    assert client.update_template.await_count == 2
+    secondo_tentativo = client.update_template.await_args_list[1].args[0]
+    assert secondo_tentativo.template_id == 999
+    client.create_template.assert_not_awaited()
     assert entry.data[CONF_TEMPLATE_ID] == 999
 
 

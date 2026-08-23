@@ -52,6 +52,18 @@ _LOGGER = logging.getLogger(__name__)
 type SwitchBotEinkConfigEntry = ConfigEntry[SwitchBotEinkCoordinator]
 
 
+def _forse_template_sparito(err: SwitchBotCanvasApiError) -> bool:
+    """Vero se l'errore puo' significare che il template non esiste piu'.
+
+    Il codice esatto non e' documentato — l'API e' privata — quindi ci si regola
+    sull'intervallo. Lo zero e' l'involucro degli errori di rete di `http.py`, e
+    tutto cio' che sta da 400 in su e' uno stato HTTP: in nessuno dei due casi il
+    backend sta dicendo qualcosa sul template, e trattarli come tale cancella un
+    `template_id` valido o ne crea un duplicato sullo slot.
+    """
+    return 0 < err.code < 400
+
+
 class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
     """Rigenera l'agenda dai calendari scelti e la pubblica se e' cambiata."""
 
@@ -266,6 +278,30 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
         dati.pop(CONF_TEMPLATE_ID, None)
         self.hass.config_entries.async_update_entry(self.config_entry, data=dati)
 
+    async def _riusa_o_crea(
+        self,
+        pagina: dict[str, Any],
+        components: list[dict[str, str]],
+        templates: list,
+    ) -> None:
+        """Riusa il template gia' presente sullo slot, altrimenti ne crea uno.
+
+        `templates` e' la lista gia' letta da `list_templates`: mai chiamarlo
+        una seconda volta per lo stesso ciclo.
+        """
+        slot = pagina["page"]
+        esistente = [t for t in templates if t.page_slot == slot]
+        if esistente:
+            template_id = esistente[0].template_id
+            await self._client.update_template(
+                self._template(pagina, template_id, components)
+            )
+        else:
+            template_id = await self._client.create_template(
+                self._template(pagina, None, components)
+            )
+        self._remember_template_id(template_id)
+
     async def _write_template(
         self, pagina: dict[str, Any], components: list[dict[str, str]]
     ) -> None:
@@ -274,13 +310,17 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
         Se il template esiste già (in cache o sul device), lo aggiorna. Se va
         creato, i componenti veri vanno dentro `create_template`: farlo con un
         segnaposto vuoto e poi chiamare `update_template` sprecherebbe una
-        chiamata e lascerebbe una finestra col canvas vuoto. Se l'update sul
-        template in cache fallisce con un errore applicativo, e' probabile che
-        qualcuno l'abbia cancellato dall'app: si dimentica l'id e si riparte
-        dal percorso list/create, un solo tentativo.
-        """
-        slot = pagina["page"]
+        chiamata e lascerebbe una finestra col canvas vuoto.
 
+        Se l'update sul template in cache fallisce con un errore applicativo
+        che puo' voler dire "il template non c'e' piu'" (vedi
+        `_forse_template_sparito`), si tenta un solo recupero: si rilegge la
+        lista e, solo se il template davvero non c'e' piu', si dimentica l'id
+        e si riusa o ricrea. Due cancelli, non uno: un codice fuori
+        dall'intervallo applicativo (errori di rete, HTTP >= 400) non passa
+        nemmeno il primo; se anche cosi' il template risulta ancora presente
+        nella lista, l'errore non significava "sparito" e risale com'era.
+        """
         if self._template_id is not None:
             try:
                 await self._client.update_template(
@@ -289,29 +329,33 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
                 return
             except SwitchBotCanvasApiError as err:
                 _LOGGER.warning(
-                    "Il template %s non e' piu' scrivibile (%s): lo dimentico "
-                    "e riparto da list_templates",
+                    "update_template sul template %s ha fallito con codice %s (%s)",
                     self._template_id,
+                    err.code,
                     err,
                 )
+                if not _forse_template_sparito(err):
+                    raise
+
+                # Secondo cancello: non creare mai al buio. Se list_templates
+                # fallisce a sua volta, non si tenta il recupero: l'eccezione
+                # risale cosi' com'e' (async_publish la traduce in
+                # UpdateFailed) e si riprova al ciclo dopo.
+                templates = await self._client.list_templates(self._device_id)
+                if any(t.template_id == self._template_id for t in templates):
+                    _LOGGER.warning(
+                        "Il template %s esiste ancora: non era sparito, "
+                        "l'errore era un altro",
+                        self._template_id,
+                    )
+                    raise
+
                 self._forget_template_id()
+                await self._riusa_o_crea(pagina, components, templates)
+                return
 
-        existing = [
-            summary
-            for summary in await self._client.list_templates(self._device_id)
-            if summary.page_slot == slot
-        ]
-        if existing:
-            template_id = existing[0].template_id
-            await self._client.update_template(
-                self._template(pagina, template_id, components)
-            )
-        else:
-            template_id = await self._client.create_template(
-                self._template(pagina, None, components)
-            )
-
-        self._remember_template_id(template_id)
+        templates = await self._client.list_templates(self._device_id)
+        await self._riusa_o_crea(pagina, components, templates)
 
     def _persist_tokens(self) -> None:
         """Ripersiste i token se il client li ha rinnovati da solo.
@@ -337,6 +381,11 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
 
         Protegge il backend da chiamate ravvicinate, non l'utente: `force`
         scavalca il controllo sull'hash ma non questo.
+
+        Il confine e' esplicitamente incluso nel permesso: a esattamente
+        `MIN_PUBLISH_INTERVAL` secondi di distanza il minimo e' gia' rispettato
+        e la pubblicazione e' ammessa (`<`, non `<=`). "Minimo 60 secondi fra
+        due pubblicazioni" vuol dire che 60 bastano, non che ne servono 61.
         """
         if self.last_published is None:
             return False
