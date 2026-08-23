@@ -24,7 +24,7 @@ Valori esatti, copiati dalla spec. Ogni task li assume validi.
 - Envelope backend: `{"resultCode":100,...,"data":...}` — successo se `resultCode == 100`
 - Envelope account: `{"statusCode":100,...,"body":...}` — successo se `statusCode == 100`
 - Header `Authorization`: `"{token_type} {access_token}"`, con `token_type` = `Bearer` se assente; **sulla sola regione `eu` il prefisso `Bearer ` va rimosso**
-- Canvas: 800 × 480, `gray4`, `safeTop` 64, `safeBottom` 44 → area utile **800 × 372**
+- Canvas: 800 × 480, `gray4`, barra di stato verticale a sinistra larga 240 px → area utile **560 × 380 con origine in `x = 240`, `y = 0`** (misurata sul dispositivo; i valori `safeTop`/`safeBottom` del bundle web sono sbagliati per questo pannello)
 - `css` ed `extra` di ogni componente viaggiano come **stringhe JSON**, non come oggetti
 - `id` di un componente: stringa che matcha `^[1-9]\d*$`, valore ≤ 2147483647, unica nel template
 - Mappatura slot: `home` → `templateType` 1 e `sortOrder` 1; `custom1`…`custom4` → `templateType` 0 e `sortOrder` 1…4
@@ -1922,7 +1922,7 @@ git commit -m "docs: registra le misure di refresh, origine e dataMode sul dispo
 
 **Interfaces:**
 - Consumes: niente dagli altri task; lo strato `layout` non importa da `api`.
-- Produces: costanti `CANVAS_WIDTH = 800`, `CANVAS_HEIGHT = 480`, `SAFE_TOP = 64`, `SAFE_BOTTOM = 44`, `USABLE_WIDTH = 800`, `USABLE_HEIGHT = 372`, `GRID_COLS = 12`, `GRID_ROWS = 6`, `DEFAULT_GUTTER = 8`; dataclass `Rect(x: int, y: int, w: int, h: int)`; `grid_to_rect(col, row, span_w, span_h, gutter=DEFAULT_GUTTER) -> Rect`; `rect_fits(rect: Rect) -> bool`; `rects_overlap(a: Rect, b: Rect) -> bool`.
+- Produces: costanti `CANVAS_WIDTH = 800`, `CANVAS_HEIGHT = 480`, `SIDEBAR_WIDTH = 240`, `USABLE_LEFT = 240`, `USABLE_TOP = 0`, `USABLE_WIDTH = 560`, `USABLE_HEIGHT = 380`, `GRID_COLS = 12`, `GRID_ROWS = 6`, `DEFAULT_GUTTER = 8`; dataclass `Rect(x: int, y: int, w: int, h: int)`; `grid_to_rect(col, row, span_w, span_h, gutter=DEFAULT_GUTTER) -> Rect`; `rect_fits(rect: Rect) -> bool`; `rects_overlap(a: Rect, b: Rect) -> bool`; `to_canvas(rect: Rect) -> Rect`, unico punto che traduce dall'area utile alle coordinate fisiche del pannello.
 
 - [ ] **Step 1: Scrivere il test che fallisce**
 
@@ -2079,11 +2079,15 @@ from typing import Final
 
 CANVAS_WIDTH: Final = 800
 CANVAS_HEIGHT: Final = 480
-SAFE_TOP: Final = 64
-SAFE_BOTTOM: Final = 44
+# Barra di stato del firmware: verticale, a sinistra. Non ci si puo' scrivere.
+SIDEBAR_WIDTH: Final = 240
 
-USABLE_WIDTH: Final = CANVAS_WIDTH
-USABLE_HEIGHT: Final = CANVAS_HEIGHT - SAFE_TOP - SAFE_BOTTOM  # 372
+# Origine dell'area utile in coordinate fisiche del pannello.
+USABLE_LEFT: Final = SIDEBAR_WIDTH
+USABLE_TOP: Final = 0
+
+USABLE_WIDTH: Final = CANVAS_WIDTH - SIDEBAR_WIDTH  # 560
+USABLE_HEIGHT: Final = 380
 
 GRID_COLS: Final = 12
 GRID_ROWS: Final = 6
@@ -3385,7 +3389,8 @@ def compile_page(
 
         if not rect_fits(rect):
             raise LayoutError(
-                f"card {index}: il rettangolo {rect} esce dall'area utile 800x372"
+                f"card {index}: il rettangolo {rect} esce dall'area utile "
+                f"{USABLE_WIDTH}x{USABLE_HEIGHT}"
             )
 
         for altro_index, altro_rect in rettangoli:
@@ -4956,7 +4961,7 @@ git commit -m "feat(ha): aggiungi servizi refresh e push_text con entita' diagno
 
 ```yaml
 # Da incollare in configuration.yaml.
-# Area utile: 800x372 px, griglia 12 colonne x 6 righe.
+# Area utile: 560x380 px a destra della barra di stato, griglia 12 colonne x 6 righe.
 switchbot_eink:
   page: custom1
   name: Casa

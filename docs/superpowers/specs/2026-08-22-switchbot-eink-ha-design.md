@@ -155,13 +155,30 @@ non si crea.
 |---|---|
 | Risoluzione | 800 × 480 |
 | Modalità colore | `gray4` — 4 livelli di grigio |
-| Safe area | `safeTop: 64`, `safeBottom: 44` |
-| **Area utilizzabile** | **800 × 372** |
+| Barra di stato | verticale, a sinistra, larga **240 px** |
+| **Area utilizzabile** | **560 × 380, con origine in `x = 240`, `y = 0`** |
 
-Resta da determinare sul campo se l'origine `y = 0` di un componente coincida con il
-bordo fisico dello schermo o con il bordo inferiore della status bar. Il renderer
-dell'editor calcola l'area utile come `height - safeTop - safeBottom`, il che suggerisce
-la seconda, ma l'ambiguità va sciolta con una misura prima di fissare la griglia.
+**Questi numeri sono misurati sul dispositivo, non dedotti dal bundle web.** Il renderer
+dell'editor dichiara `safeTop: 64` e `safeBottom: 44` e calcola l'area utile come
+`height - safeTop - safeBottom`: descrive una geometria diversa, e per questo pannello è
+sbagliato. Sul dispositivo reale non c'è nessuna fascia orizzontale riservata — `y = 0` è
+visibile — mentre il firmware disegna una barra **verticale a sinistra** con data, ora e
+meteo della città dell'account. È la stessa `statusBar` che compare nella risposta di
+`preview`, quella che porta il campo `city`.
+
+Misura, con la sonda `tools/probe.py`:
+
+- comando `ruler`, tacche numerate ogni 40 px poi ogni 10: la prima coordinata `x`
+  leggibile per intero è **240**; sull'asse `y` si legge da `0`, e un'etichetta che
+  comincia a `370` risulta tagliata a metà;
+- comando `frame`, quattro angoli sul rettangolo `240,0 - 800,370`: tutti e quattro
+  visibili per intero, con margine residuo in basso.
+
+Conseguenza sull'architettura: lo strato `layout/` resta uno spazio di coordinate puro
+con origine in `(0, 0)` e dimensioni 560 × 380 — chi scrive una pagina non deve sapere
+che esiste una barra laterale. La traduzione in coordinate fisiche avviene una volta
+sola, in `layout/grid.py:to_canvas`, chiamata dal compilatore al momento di serializzare
+il componente.
 
 ### Formato di un componente
 
@@ -281,7 +298,7 @@ così il config flow e il coordinator possono distinguere i due casi.
 
 ### Strato 2 — compilatore layout
 
-Griglia di **12 colonne × 6 righe** sull'area utile 800 × 372, con gutter configurabile
+Griglia di **12 colonne × 6 righe** sull'area utile 560 × 380, con gutter configurabile
 (default 8 px). Una cella misura circa 66 × 62 px.
 
 ```yaml
