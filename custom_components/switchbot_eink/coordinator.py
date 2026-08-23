@@ -35,6 +35,7 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_CALENDARS,
     CONF_DEVICE_ID,
+    CONF_DEVICE_NAME,
     CONF_REFRESH_TOKEN,
     CONF_TEMPLATE_ID,
     CONF_TOKEN_TYPE,
@@ -83,6 +84,9 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
         )
         self._client = client
         self._device_id: str = entry.data[CONF_DEVICE_ID]
+        # Serve solo nei messaggi d'errore: con piu' pannelli configurati,
+        # sapere quale ha fallito e' meta' della diagnosi.
+        self._device_name: str = entry.data.get(CONF_DEVICE_NAME) or self._device_id
         self._template_id: int | None = entry.data.get(CONF_TEMPLATE_ID)
         self._last_hash: str | None = None
         # Consumato una volta sola dal ciclo successivo di `_async_update_data`:
@@ -460,6 +464,11 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
         self._forza_prossimo = True
         await self.async_refresh()
         if not self.last_update_success:
+            # Il nome del pannello e la causa vera devono stare nel messaggio:
+            # e' l'unico testo che chi ha scritto l'automazione vedra' nei log,
+            # e con piu' pannelli un "pubblicazione non riuscita" nudo non gli
+            # dice ne' quale ne' perche'.
             raise HomeAssistantError(
-                "Pubblicazione non riuscita"
+                f"{self._device_name}: pubblicazione non riuscita "
+                f"({self.last_exception})"
             ) from self.last_exception

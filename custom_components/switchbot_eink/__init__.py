@@ -9,6 +9,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .api.auth import Tokens
@@ -30,6 +31,13 @@ _LOGGER = logging.getLogger(__name__)
 # ascoltatori veri del coordinator (vedi il commento sull'ascoltatore finto
 # piu' sotto).
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+
+
+# L'integrazione si configura solo dall'interfaccia. Senza questo, da quando
+# esiste `async_setup` un blocco `switchbot_eink:` in configuration.yaml verrebbe
+# accettato in silenzio: chi lo scrivesse aspetterebbe un effetto che non arriva,
+# senza un avviso da nessuna parte.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -117,10 +125,17 @@ def _register_services(hass: HomeAssistant) -> None:
                 errori.append(err)
 
         if errori:
-            raise HomeAssistantError(
-                f"{len(errori)} pannello/i su {len(coordinatori)} non "
-                "aggiornato/i: " + "; ".join(str(err) for err in errori)
+            # Ogni errore nomina gia' il proprio pannello e porta la causa: qui
+            # basta cucirli insieme. Il conteggio serve solo quando i pannelli
+            # sono piu' di uno, altrimenti e' rumore ("1 pannello su 1").
+            testa = (
+                f"{len(errori)} pannelli su {len(coordinatori)} non aggiornati. "
+                if len(coordinatori) > 1
+                else ""
             )
+            raise HomeAssistantError(
+                testa + " ".join(str(err) for err in errori)
+            ) from errori[0]
 
     hass.services.async_register(
         DOMAIN, SERVICE_REFRESH, handle_refresh, schema=vol.Schema({})

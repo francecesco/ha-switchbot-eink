@@ -436,6 +436,12 @@ async def test_ogni_pannello_ha_le_sue_entita_con_unique_id_distinti(
     }
 
 
+def _coordinator_di(hass: HomeAssistant):
+    """Il coordinator dell'unica entry caricata."""
+    (entry,) = hass.config_entries.async_entries(DOMAIN)
+    return entry.runtime_data
+
+
 async def test_available_resta_vero_anche_se_una_pubblicazione_fallisce(
     hass: HomeAssistant, client_mock, freezer
 ) -> None:
@@ -456,3 +462,72 @@ async def test_available_resta_vero_anche_se_una_pubblicazione_fallisce(
         stato = hass.states.get(entity_id)
         assert stato is not None
         assert stato.state != "unavailable"
+
+
+async def test_il_sensore_conserva_lultimo_istante_riuscito_dopo_un_guasto(
+    hass: HomeAssistant, client_mock, freezer
+) -> None:
+    """Sparire non basta evitarlo: il valore deve restare quello vero, cosi'
+    chi guarda capisce da quanto il pannello non riceve niente."""
+    freezer.move_to("2026-08-23T12:00:00+00:00")
+    await _setup(hass, client_mock)
+    riuscito = hass.states.get(SENSOR_ID).state
+
+    freezer.tick(61)
+    client_mock.release.side_effect = SwitchBotCanvasApiError(500, "boom")
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH, {}, blocking=True)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(SENSOR_ID).state == riuscito
+
+
+async def test_il_sensore_dellautenticazione_si_accende_col_token_scaduto(
+    hass: HomeAssistant, client_mock, freezer
+) -> None:
+    """Il ramo che conta davvero: un guasto generico lascia l'autenticazione a
+    posto, quindi un test che usi un errore qualunque non tocca mai questo
+    codice. Prima della correzione su `available` era irraggiungibile, perche'
+    l'entita' era gia' `unavailable` nell'istante in cui doveva accendersi."""
+    freezer.move_to("2026-08-23T12:00:00+00:00")
+    await _setup(hass, client_mock)
+    assert hass.states.get(BINARY_SENSOR_ID).state == "off"
+
+    freezer.tick(61)
+    client_mock.release.side_effect = SwitchBotCanvasAuthError("token scaduto")
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH, {}, blocking=True)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(BINARY_SENSOR_ID).state == "on"
+
+
+async def test_una_forzatura_fallita_non_forza_anche_i_cicli_dopo(
+    hass: HomeAssistant, client_mock, freezer
+) -> None:
+    """Il flag di forzatura si consuma all'inizio del ciclo, non alla fine: se
+    si azzerasse dopo `async_publish`, un guasto lo lascerebbe armato e ogni
+    ciclo periodico successivo pubblicherebbe forzato per sempre."""
+    freezer.move_to("2026-08-23T12:00:00+00:00")
+    await _setup(hass, client_mock)
+    coordinator = _coordinator_di(hass)
+
+    freezer.tick(61)
+    client_mock.release.side_effect = SwitchBotCanvasApiError(500, "boom")
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(DOMAIN, SERVICE_REFRESH, {}, blocking=True)
+    await hass.async_block_till_done()
+
+    assert coordinator._forza_prossimo is False
+
+
+async def test_un_blocco_yaml_viene_segnalato_invece_che_ignorato(
+    hass: HomeAssistant, caplog
+) -> None:
+    """L'integrazione si configura solo dall'interfaccia. Da quando esiste
+    `async_setup`, senza `CONFIG_SCHEMA` un blocco in configuration.yaml
+    passerebbe in silenzio e chi l'ha scritto aspetterebbe un effetto che non
+    arriva."""
+    assert await async_setup_component(hass, DOMAIN, {DOMAIN: {"foo": "bar"}})
+
+    assert "configuration.yaml" in caplog.text.lower() or "yaml" in caplog.text.lower()
