@@ -25,12 +25,25 @@
       }
     },
     "error": {
-      "invalid_auth": "Credenziali non valide o servizio non raggiungibile."
+      "invalid_auth": "Credenziali non valide.",
+      "cannot_connect": "Impossibile raggiungere il servizio SwitchBot. Riprova.",
+      "unknown": "Errore imprevisto. Controlla i log di Home Assistant."
     },
     "abort": {
       "no_devices_found": "Nessun pannello e-ink trovato su questo account.",
       "already_configured": "Questo pannello è già configurato.",
-      "reauth_successful": "Autenticazione rinnovata."
+      "reauth_successful": "Autenticazione rinnovata.",
+      "account_mismatch": "Questo account non possiede il pannello configurato. Accedi con l'account usato in origine."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Intervallo di aggiornamento",
+        "data": {
+          "update_interval": "Secondi fra una pubblicazione e l'altra"
+        }
+      }
     }
   }
 }

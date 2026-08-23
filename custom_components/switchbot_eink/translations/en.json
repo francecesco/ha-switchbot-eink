@@ -25,12 +25,25 @@
       }
     },
     "error": {
-      "invalid_auth": "Invalid credentials, or the service is unreachable."
+      "invalid_auth": "Invalid credentials.",
+      "cannot_connect": "Cannot reach the SwitchBot service. Try again.",
+      "unknown": "Unexpected error. Check the Home Assistant logs."
     },
     "abort": {
       "no_devices_found": "No e-ink panel found on this account.",
       "already_configured": "This panel is already configured.",
-      "reauth_successful": "Authentication renewed."
+      "reauth_successful": "Authentication renewed.",
+      "account_mismatch": "This account does not own the configured panel. Sign in with the account used originally."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update interval",
+        "data": {
+          "update_interval": "Seconds between publishes"
+        }
+      }
     }
   }
 }

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from typing import Final
 
+from homeassistant.const import CONF_USERNAME as CONF_USERNAME  # noqa: F401 — re-export
+
 DOMAIN: Final = "switchbot_eink"
 
 CONF_REGION: Final = "region"
-CONF_USERNAME: Final = "username"
 CONF_ACCESS_TOKEN: Final = "access_token"
 CONF_REFRESH_TOKEN: Final = "refresh_token"
 CONF_TOKEN_TYPE: Final = "token_type"

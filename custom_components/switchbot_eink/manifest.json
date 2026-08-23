@@ -1,11 +1,11 @@
 {
   "domain": "switchbot_eink",
   "name": "SwitchBot E-Ink Home Dashboard",
-  "codeowners": [],
+  "codeowners": ["@francecesco"],
   "config_flow": true,
   "documentation": "https://github.com/francecesco/switchbot-eink",
   "integration_type": "device",
-  "iot_class": "cloud_push",
+  "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/francecesco/switchbot-eink/issues",
   "requirements": [],
   "version": "0.1.0"
