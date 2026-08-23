@@ -443,6 +443,46 @@ async def test_errore_429_non_tenta_il_recupero(
     assert entry.data[CONF_TEMPLATE_ID] == 77
 
 
+async def test_il_codice_400_esatto_non_tenta_il_recupero(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """Il confine del criterio: 400 e' gia' uno stato HTTP, non un codice
+    applicativo. Un `<=` al posto del `<` lo farebbe rientrare nel recupero."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(
+        side_effect=SwitchBotCanvasApiError(400, "HTTP 400")
+    )
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    with pytest.raises(UpdateFailed):
+        await coordinatore.async_publish()
+
+    client.list_templates.assert_not_awaited()
+    client.create_template.assert_not_awaited()
+    assert entry.data[CONF_TEMPLATE_ID] == 77
+
+
+async def test_il_codice_399_tenta_il_recupero(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """L'altra meta' dello stesso confine: 399 e' applicativo e deve entrare."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(
+        side_effect=SwitchBotCanvasApiError(399, "codice applicativo")
+    )
+    client.list_templates = AsyncMock(return_value=[])
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    await coordinatore.async_publish()
+
+    client.list_templates.assert_awaited()
+    client.create_template.assert_awaited()
+
+
 async def test_recupero_con_list_templates_che_fallisce_non_crea(
     hass: HomeAssistant, entry, client, freezer
 ) -> None:

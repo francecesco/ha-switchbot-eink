@@ -268,33 +268,50 @@ def test_manifest_dichiara_la_dipendenza_dal_calendario() -> None:
 async def test_l_ascoltatore_finto_e_registrato_per_essere_rimosso_allo_unload(
     hass: HomeAssistant, entry
 ) -> None:
-    """`async_add_listener` ritorna una funzione per rimuovere l'ascoltatore:
-    va passata a `entry.async_on_unload`, altrimenti resta agganciata per
-    sempre all'istanza del coordinator anche dopo lo scarico della entry.
+    """`async_add_listener` ritorna la funzione che rimuove l'ascoltatore, e
+    quella funzione va passata a `entry.async_on_unload`.
 
-    Verificato empiricamente che con `config_entry=entry` passato alla classe
-    base, `DataUpdateCoordinator` registra gia' da solo `async_shutdown` come
-    callback di unload (cancella comunque il timer), quindi un test che
-    guardi solo "il coordinator ripubblica dopo lo unload?" non discrimina
-    questa mutazione — e' rimasta cosi' anche dopo la rimozione del wrap.
-    L'unico modo per osservarla e' verificare che la registrazione avvenga:
-    `entry.async_on_unload` viene chiamato tre volte durante il setup — una
-    volta dalla stessa classe base (`DataUpdateCoordinator.__init__` registra
-    `self.async_shutdown` non appena riceve `config_entry=entry`), una per
-    l'ascoltatore finto, una per il listener di ricarica delle opzioni.
+    Questo e' un test di meccanica, non di comportamento, e la ragione va detta:
+    con `config_entry=entry` passato alla classe base, `DataUpdateCoordinator`
+    registra gia' da se' `async_shutdown`, che cancella comunque il timer. Il
+    risultato osservabile quindi non cambia se il wrap sparisce — ma appoggiarsi
+    a quel dettaglio interno, non documentato, e' proprio il tipo di dipendenza
+    implicita che vogliamo evitare: la registrazione esplicita resta, e questo
+    test la difende.
+
+    Non conta le chiamate: un conteggio si romperebbe alla prima registrazione
+    aggiunta altrove. Verifica che sia proprio *quella* funzione di rimozione a
+    essere stata registrata.
     """
     entry.add_to_hass(hass)
+
+    rimozioni: list[object] = []
+    aggiungi_originale = SwitchBotEinkCoordinator.async_add_listener
+
+    def _traccia(self, *args, **kwargs):
+        rimozione = aggiungi_originale(self, *args, **kwargs)
+        rimozioni.append(rimozione)
+        return rimozione
 
     with patch(PERCORSO_CLIENT) as client_cls:
         _mock_client(client_cls)
         with patch(PERCORSO_PUBLISH, AsyncMock(return_value=True)):
             with patch.object(
-                entry, "async_on_unload", wraps=entry.async_on_unload
-            ) as on_unload_spia:
-                assert await hass.config_entries.async_setup(entry.entry_id)
-                await hass.async_block_till_done()
+                SwitchBotEinkCoordinator, "async_add_listener", _traccia
+            ):
+                with patch.object(
+                    entry, "async_on_unload", wraps=entry.async_on_unload
+                ) as on_unload_spia:
+                    assert await hass.config_entries.async_setup(entry.entry_id)
+                    await hass.async_block_till_done()
 
-    assert on_unload_spia.call_count == 3
+    assert rimozioni, "il setup non ha registrato nessun ascoltatore"
+    registrate = [
+        chiamata.args[0]
+        for chiamata in on_unload_spia.call_args_list
+        if chiamata.args
+    ]
+    assert rimozioni[0] in registrate
 
 
 async def test_dopo_lo_unload_il_coordinator_non_pubblica_piu(
