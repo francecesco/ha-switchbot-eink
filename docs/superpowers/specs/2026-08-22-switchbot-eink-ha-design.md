@@ -459,8 +459,13 @@ secondi tra due pubblicazioni.
 **Servizi.**
 
 - `switchbot_eink.refresh` — forza ricompilazione e pubblicazione, ignorando l'hash.
-- `switchbot_eink.push_text` — scorciatoia che scrive un testo su una card nominata,
-  per le automazioni ("è arrivato un pacco").
+  Utile prima di premere il pulsante del pannello: garantisce che ciò che il
+  dispositivo scaricherà sia appena stato rigenerato.
+
+`push_text`, previsto in una stesura precedente per scrivere su una card nominata dalle
+automazioni, **è stato tolto**: la pagina dell'agenda è generata, e non ha card nominate
+su cui scrivere. L'idea di una riga di avviso estemporanea è annotata fra le cose per
+dopo.
 
 **Entità diagnostiche.** Un `sensor` con l'ora dell'ultima pubblicazione riuscita e un
 `binary_sensor` per lo stato di autenticazione, così i fallimenti sono visibili in HA
@@ -510,3 +515,7 @@ backend e permette di verificare il risultato senza attendere il refresh del pan
 - Un `image` a tutto schermo con una dashboard renderizzata da HA. Massima libertà
   grafica, ma serve un renderer e un URL pubblico.
 - I due pulsanti fisici del dispositivo come trigger di automazioni HA.
+- Una riga di avviso estemporanea sull'agenda, scritta da un'automazione
+  ("è arrivato un pacco"). Richiede uno stato che sopravviva alla rigenerazione
+  della pagina e una regola su quando scade: non e' una scorciatoia, e' una
+  funzione a sé.

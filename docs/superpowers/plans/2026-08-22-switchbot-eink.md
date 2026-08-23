@@ -5317,7 +5317,11 @@ git commit -m "feat(ha): aggiungi coordinator con pubblicazione condizionata all
 
 **Interfaces:**
 - Consumes: da Task 12 — `SwitchBotEinkCoordinator`, `SwitchBotEinkConfigEntry`; da Task 10 — `SERVICE_REFRESH`, `SERVICE_PUSH_TEXT`, `DOMAIN`.
-- Produces: i servizi `switchbot_eink.refresh` e `switchbot_eink.push_text`, l'entità `sensor.<device>_ultima_pubblicazione` e l'entità `binary_sensor.<device>_autenticazione`, più il metodo `SwitchBotEinkCoordinator.async_push_text(card_name: str, text: str) -> None`.
+- Produces: il servizio `switchbot_eink.refresh`, l'entità `sensor.<device>_ultima_pubblicazione` e l'entità `binary_sensor.<device>_autenticazione`.
+
+**Modifica rispetto alla stesura originale — leggila prima dei passi.** Il servizio `push_text` **non va implementato**, e ogni passo qui sotto che lo riguarda va saltato: scriveva un testo su una card nominata, e la pagina dell'agenda è generata, quindi card nominate non ne ha. Salta anche il metodo `async_push_text` sul coordinator e la costante `SERVICE_PUSH_TEXT`, che va rimossa da `const.py` insieme ai suoi eventuali usi. Resta il solo servizio `refresh`, che è genuinamente utile: prima di premere il pulsante del pannello garantisce che ciò che il dispositivo scaricherà sia appena stato rigenerato.
+
+**Seconda modifica.** Con questo task `PLATFORMS` smette di essere vuota: diventa `[Platform.BINARY_SENSOR, Platform.SENSOR]`. Due conseguenze da verificare, non da dare per scontate: le entità diventano ascoltatori veri del coordinator, e il test `test_unload_invoca_async_unload_platforms` in `tests/ha/test_init.py` — che oggi porta un commento che lo dichiara "meccanica finché le piattaforme sono zero" — torna a essere un test di comportamento. Aggiorna quel commento e verifica che il test regga ancora.
 
 - [ ] **Step 1: Scrivere il test che fallisce**
 
