@@ -194,18 +194,16 @@ async def test_unload_scarica_la_entry(hass: HomeAssistant, entry) -> None:
 
 
 async def test_unload_invoca_async_unload_platforms(hass: HomeAssistant, entry) -> None:
-    """Con `PLATFORMS = []` un `async_unload_entry` che si limitasse a
-    `return True` produrrebbe comunque `entry.state == NOT_LOADED`, perche'
-    con zero piattaforme la pulizia che conta avviene nei callback che il
-    nucleo di Home Assistant registra ed esegue a prescindere dal corpo di
-    questa funzione. L'unico modo per osservare che rilascia davvero le
-    risorse (oggi un no-op, domani no) e' verificare che la chiamata avvenga.
+    """Un `async_unload_entry` che si limitasse a `return True` produrrebbe
+    comunque `entry.state == NOT_LOADED`, perche' quello stato lo marca il
+    nucleo di Home Assistant a prescindere dal corpo di questa funzione.
+    L'unico modo per osservare che rilascia davvero le risorse e' verificare
+    che la chiamata avvenga.
 
-    Nota: con `PLATFORMS` vuoto questo test verifica la meccanica (la
-    chiamata avviene) e non il comportamento (qualcosa viene davvero
-    rilasciato) — tornera' a essere un test di comportamento vero quando un
-    task futuro aggiungera' le entita' diagnostiche e quindi delle
-    piattaforme reali da scaricare.
+    Con `PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]` (entita'
+    diagnostiche di questo task) questo e' tornato un test di comportamento
+    vero: la spia verifica che le due piattaforme reali vengano scaricate
+    davvero, non piu' solo che una lista vuota venga passata a un no-op.
     """
     entry.add_to_hass(hass)
 

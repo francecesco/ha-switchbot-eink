@@ -29,4 +29,3 @@ DEFAULT_UPDATE_INTERVAL: Final = 900  # secondi
 MIN_PUBLISH_INTERVAL: Final = 60  # secondi, vincolo di spec
 
 SERVICE_REFRESH: Final = "refresh"
-SERVICE_PUSH_TEXT: Final = "push_text"

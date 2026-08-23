@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import logging
 
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api.auth import Tokens
@@ -15,13 +17,17 @@ from .const import (
     CONF_REGION,
     CONF_TOKEN_TYPE,
     CONF_USER_ID,
+    DOMAIN,
+    SERVICE_REFRESH,
 )
 from .coordinator import SwitchBotEinkConfigEntry, SwitchBotEinkCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# Nessuna entita' propria ancora: il coordinator basta a pubblicare l'agenda.
-PLATFORMS: list[Platform] = []
+# Le entita' diagnostiche di questo task: oltre a esporre stato, sono
+# ascoltatori veri del coordinator (vedi il commento sull'ascoltatore finto
+# piu' sotto).
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
 
 async def async_setup_entry(
@@ -52,15 +58,44 @@ async def async_setup_entry(
     # ascoltatore. Questo coordinator esiste per produrre un effetto (pubblicare
     # sul pannello), non per servire dati a delle entita': senza un ascoltatore
     # proprio pubblicherebbe una volta sola all'avvio e mai piu'. Le entita'
-    # diagnostiche di un task futuro diventeranno ascoltatori vere, ma la
-    # correttezza non deve dipendere dalla loro esistenza.
+    # diagnostiche aggiunte con questo task sono ascoltatori veri, ma la
+    # correttezza non deve dipendere dalla loro esistenza (ne' da come sono
+    # implementate): l'ascoltatore finto resta indipendente da loro.
     entry.async_on_unload(coordinator.async_add_listener(lambda: None))
 
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(_ricarica_su_cambio_opzioni))
+    _register_services(hass)
     return True
+
+
+def _register_services(hass: HomeAssistant) -> None:
+    """Registra il servizio `refresh` una sola volta, alla prima entry configurata."""
+    if hass.services.has_service(DOMAIN, SERVICE_REFRESH):
+        return
+
+    def _coordinators() -> list[SwitchBotEinkCoordinator]:
+        return [
+            entry.runtime_data
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if entry.state is ConfigEntryState.LOADED
+        ]
+
+    async def handle_refresh(call: ServiceCall) -> None:
+        for coordinator in _coordinators():
+            await coordinator.async_publish(force=True)
+            # `async_publish` chiamato cosi', fuori dal ciclo di
+            # `_async_refresh`, non passa mai da `async_update_listeners`:
+            # senza questa chiamata esplicita le entita' diagnostiche
+            # resterebbero ferme al valore del ciclo periodico precedente
+            # fino al prossimo giro del timer.
+            coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_REFRESH, handle_refresh, schema=vol.Schema({})
+    )
 
 
 async def _ricarica_su_cambio_opzioni(
@@ -91,5 +126,17 @@ async def _ricarica_su_cambio_opzioni(
 async def async_unload_entry(
     hass: HomeAssistant, entry: SwitchBotEinkConfigEntry
 ) -> bool:
-    """Scarica la entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    """Scarica la entry e, se era l'ultima, il servizio `refresh` con lei."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        # A questo punto il nucleo non ha ancora marcato `entry` come
+        # scaricata (lo fa dopo che questa funzione ritorna): va esclusa
+        # esplicitamente dal conteggio delle entry ancora caricate.
+        altre_caricate = [
+            e
+            for e in hass.config_entries.async_entries(DOMAIN)
+            if e.entry_id != entry.entry_id and e.state is ConfigEntryState.LOADED
+        ]
+        if not altre_caricate:
+            hass.services.async_remove(DOMAIN, SERVICE_REFRESH)
+    return unload_ok
