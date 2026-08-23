@@ -6,14 +6,14 @@ from .compile import EntityValue, LayoutError, compile_page, components_hash
 from .schema import CARD_TYPES, DEFAULT_PAGE_SLOT, PAGE_SLOTS, validate_page
 
 __all__ = [
-    "CARD_TYPES",
-    "DEFAULT_PAGE_SLOT",
-    "PAGE_SLOTS",
-    "Event",
-    "EntityValue",
-    "LayoutError",
     "build_agenda_page",
+    "CARD_TYPES",
     "compile_page",
     "components_hash",
+    "DEFAULT_PAGE_SLOT",
+    "EntityValue",
+    "Event",
+    "LayoutError",
+    "PAGE_SLOTS",
     "validate_page",
 ]

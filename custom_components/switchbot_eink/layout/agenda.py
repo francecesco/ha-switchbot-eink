@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from .const import USABLE_WIDTH
@@ -62,12 +62,15 @@ _Y_AGGIORNAMENTO = 352
 
 _CORPO_INTESTAZIONE = 24
 _CORPO_EVENTO = 22
-_CORPO_MARCATORE = 18
+_CORPO_MARCATORE = 14
 _CORPO_GIORNO = 16
 _CORPO_AGGIORNAMENTO = 13
 
-_LARGHEZZA_MARCATORE = 12
+# Con corpo 18 e 12 px un marcatore a due lettere ("LU") non ci stava: la
+# colonna e' piu' larga, e ora/titolo si spostano di conseguenza.
+_LARGHEZZA_MARCATORE = 20
 _LARGHEZZA_ORA = 72
+_X_TITOLO_CON_MARCATORI = 104
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,7 +95,9 @@ def calendar_markers(names: Sequence[str]) -> dict[str, str]:
     marcatori: dict[str, str] = {}
     presi: set[str] = set()
 
-    for indice, nome in enumerate(names):
+    # Deduplicare prima di assegnare: senza questo, due occorrenze dello stesso
+    # nome si contendono "L" e "LA" e una delle due lettere resta sprecata.
+    for indice, nome in enumerate(dict.fromkeys(names)):
         pulito = nome.strip() or "?"
         candidato = next(
             (c for c in (pulito[0].upper(), pulito[:2].upper()) if c not in presi),
@@ -145,9 +150,36 @@ def _intestazione(giorno: date) -> str:
     return f"OGGI · {GIORNI[giorno.weekday()]} {giorno.day} {MESI[giorno.month - 1]}"
 
 
-def _sintesi(evento: Event) -> str:
+def _copre(evento: Event, giorno: date) -> bool:
+    """Vero se l'evento occupa almeno un istante del giorno.
+
+    Raggruppare per `start.date()` faceva sparire tutto cio' che era gia' in
+    corso: una settimana di ferie cominciata lunedi' non compariva il mercoledi'.
+    """
+    inizio = evento.start.date()
+    fine = evento.end.date()
+    # La fine e' esclusiva: Home Assistant mette il giorno *dopo* l'ultimo per gli
+    # eventi di tutto il giorno, e un evento con orario che finisce a mezzanotte
+    # non occupa il giorno seguente.
+    if evento.end.time() == time.min and fine > inizio:
+        fine -= timedelta(days=1)
+    return inizio <= giorno <= fine
+
+
+def _chiave_ordine(evento: Event, giorno: date) -> tuple[bool, datetime, str, str]:
+    """Ordinamento totale: senza gli ultimi due campi due eventi alla stessa ora
+    si scambiano a seconda di come il backend li restituisce, l'hash cambia, e il
+    pannello viene ripubblicato senza motivo.
+    """
+    in_corso = evento.all_day or evento.start.date() < giorno
+    return (not in_corso, evento.start, evento.summary, evento.calendar)
+
+
+def _sintesi(evento: Event, giorno: date) -> str:
     if evento.all_day:
         return f"{evento.summary} (tutto il giorno)"
+    if evento.start.date() < giorno:
+        return f"In corso · {evento.summary}"
     return f"{evento.start.strftime('%H:%M')} {evento.summary}"
 
 
@@ -155,22 +187,32 @@ def _riga_giorno(giorno: date, eventi: Sequence[Event]) -> str:
     etichetta = f"{GIORNI_BREVI[giorno.weekday()]} {giorno.day}"
     if not eventi:
         return f"{etichetta}   nessun evento"
-    return f"{etichetta}   " + " · ".join(_sintesi(e) for e in eventi)
+    return f"{etichetta}   " + " · ".join(_sintesi(e, giorno) for e in eventi)
 
 
 def _per_giorno(
     events: Sequence[Event], giorni: Sequence[date]
 ) -> dict[date, list[Event]]:
-    raggruppati: dict[date, list[Event]] = {giorno: [] for giorno in giorni}
-    for evento in events:
-        giorno = evento.start.date()
-        if giorno in raggruppati:
-            raggruppati[giorno].append(evento)
-    for eventi in raggruppati.values():
-        # Quelli di tutto il giorno vanno in testa: non hanno un'ora con cui
-        # collocarsi fra gli altri.
-        eventi.sort(key=lambda e: (not e.all_day, e.start))
+    raggruppati: dict[date, list[Event]] = {}
+    for giorno in giorni:
+        # Un evento appartiene a un giorno se lo occupa, non se ci comincia.
+        eventi_del_giorno = [evento for evento in events if _copre(evento, giorno)]
+        eventi_del_giorno.sort(key=lambda e: _chiave_ordine(e, giorno))
+        raggruppati[giorno] = eventi_del_giorno
     return raggruppati
+
+
+def _titolo_riga_oggi(evento: Event, oggi: date) -> tuple[str, str]:
+    """(ora, titolo) per la riga di un evento nella lista di oggi.
+
+    Un evento in corso non ha un'ora d'inizio sensata da mostrare oggi: viene
+    da un giorno precedente.
+    """
+    if evento.all_day:
+        return "", f"Tutto il giorno · {evento.summary}"
+    if evento.start.date() < oggi:
+        return "", f"In corso · {evento.summary}"
+    return evento.start.strftime("%H:%M"), evento.summary
 
 
 def build_agenda_page(
@@ -210,7 +252,7 @@ def build_agenda_page(
             )
         )
     else:
-        cards.extend(_righe_di_oggi(raggruppati[oggi], marcatori))
+        cards.extend(_righe_di_oggi(raggruppati[oggi], marcatori, now, oggi))
         cards.append(_filetto(_Y_FILETTO_BASSO))
         for indice, giorno in enumerate(giorni[1:]):
             cards.append(
@@ -239,13 +281,40 @@ def build_agenda_page(
 
 
 def _righe_di_oggi(
-    eventi: Sequence[Event], marcatori: dict[str, str]
+    eventi: Sequence[Event], marcatori: dict[str, str], now: datetime, oggi: date
 ) -> list[dict[str, Any]]:
-    visibili = list(eventi[:MAX_EVENTI_OGGI])
+    if not eventi:
+        # Oggi non copre nessun evento, ma la finestra non e' vuota (altrimenti
+        # saremmo nel ramo "nessun evento nei prossimi giorni"): dirlo evita
+        # 230 px di bianco che sembrano un guasto.
+        return [
+            _card(
+                "Nessun evento oggi",
+                (0, _Y_PRIMA_RIGA, USABLE_WIDTH, 30),
+                _CORPO_EVENTO,
+                "center",
+            )
+        ]
+
+    # Gli eventi gia' conclusi non devono rubare le righe a quelli che devono
+    # ancora arrivare. Un evento di tutto il giorno resta valido tutto il
+    # giorno anche se la sua "fine" non e' un orario realistico.
+    attivi = [e for e in eventi if e.all_day or e.end > now]
+    if not attivi:
+        return [
+            _card(
+                "Nessun altro evento oggi",
+                (0, _Y_PRIMA_RIGA, USABLE_WIDTH, 30),
+                _CORPO_EVENTO,
+                "center",
+            )
+        ]
+
+    visibili = list(attivi[:MAX_EVENTI_OGGI])
     cards: list[dict[str, Any]] = []
 
     if marcatori:
-        x_ora, x_titolo = _LARGHEZZA_MARCATORE + 4, 96
+        x_ora, x_titolo = _LARGHEZZA_MARCATORE + 4, _X_TITOLO_CON_MARCATORI
     else:
         x_ora, x_titolo = 0, 80
     larghezza_titolo = USABLE_WIDTH - x_titolo
@@ -256,18 +325,22 @@ def _righe_di_oggi(
         if marcatori:
             cards.append(
                 _card(
-                    marcatori.get(evento.calendar, ""),
+                    # Un calendario non elencato non deve prendere un
+                    # marcatore vuoto in silenzio: "?" e' visibile.
+                    marcatori.get(evento.calendar, "?"),
                     (0, y, _LARGHEZZA_MARCATORE, 30),
                     _CORPO_MARCATORE,
                 )
             )
 
-        ora = "" if evento.all_day else evento.start.strftime("%H:%M")
-        titolo = (
-            f"Tutto il giorno · {evento.summary}" if evento.all_day else evento.summary
-        )
+        ora, titolo = _titolo_riga_oggi(evento, oggi)
 
-        cards.append(_card(ora, (x_ora, y, _LARGHEZZA_ORA, 30), _CORPO_EVENTO, "right"))
+        # Un evento di tutto il giorno, o gia' in corso, non ha un'ora da
+        # mostrare: niente card vuota nella colonna dell'ora.
+        if ora:
+            cards.append(
+                _card(ora, (x_ora, y, _LARGHEZZA_ORA, 30), _CORPO_EVENTO, "right")
+            )
         cards.append(
             _card(
                 truncate(titolo, larghezza_titolo, _CORPO_EVENTO),
@@ -276,7 +349,7 @@ def _righe_di_oggi(
             )
         )
 
-    nascosti = len(eventi) - len(visibili)
+    nascosti = len(attivi) - len(visibili)
     if nascosti:
         cards.append(
             _card(

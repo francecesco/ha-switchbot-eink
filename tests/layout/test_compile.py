@@ -332,3 +332,43 @@ def test_una_card_normale_passa_ancora_dal_renderer() -> None:
     componenti = compile_page(pagina, lambda _testo: "RESO", risolvi)
 
     assert json.loads(componenti[0]["extra"])["content"]["text"] == "RESO"
+
+
+def test_template_disattivato_vale_anche_per_metric_label() -> None:
+    """La guardia sui template non deve valere solo per le card di testo."""
+    pagina = validate_page(
+        {
+            "cards": [
+                {
+                    "type": "metric",
+                    "grid": [0, 0, 3, 1],
+                    "value": "1",
+                    "label": "{{ 1 + 1 }}",
+                    "template": False,
+                }
+            ]
+        }
+    )
+
+    componenti = compile_page(pagina, lambda _t: "RESO", risolvi)
+
+    assert json.loads(componenti[0]["extra"])["content"]["label"] == "{{ 1 + 1 }}"
+
+
+def test_template_disattivato_vale_anche_per_image_src() -> None:
+    pagina = validate_page(
+        {
+            "cards": [
+                {
+                    "type": "image",
+                    "grid": [0, 0, 3, 1],
+                    "src": "{{ 1 + 1 }}",
+                    "template": False,
+                }
+            ]
+        }
+    )
+
+    componenti = compile_page(pagina, lambda _t: "RESO", risolvi)
+
+    assert json.loads(componenti[0]["extra"])["content"]["src"] == "{{ 1 + 1 }}"
