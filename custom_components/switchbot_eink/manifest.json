@@ -1,6 +1,7 @@
 {
   "domain": "switchbot_eink",
   "name": "SwitchBot E-Ink Home Dashboard",
+  "after_dependencies": ["calendar"],
   "codeowners": ["@francecesco"],
   "config_flow": true,
   "documentation": "https://github.com/francecesco/switchbot-eink",

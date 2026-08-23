@@ -242,6 +242,16 @@ def test_lora_di_aggiornamento_e_sempre_presente() -> None:
         assert "agg. 17:24" in testi
 
 
+def test_stamp_false_omette_lora_di_aggiornamento() -> None:
+    """Chi confronta due pagine per decidere se ripubblicare deve poter
+    escludere l'orario: altrimenti cambia ad ogni minuto e il confronto e'
+    inutile."""
+    for eventi in ([], [evento(20, "Riunione")]):
+        testi = testi_di(build_agenda_page(eventi, ADESSO, stamp=False))
+
+        assert not any(t.startswith("agg. ") for t in testi)
+
+
 def test_con_un_solo_calendario_non_compaiono_marcatori() -> None:
     page = build_agenda_page([evento(20, "Riunione")], ADESSO, calendars=["Personale"])
 

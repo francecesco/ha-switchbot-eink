@@ -48,9 +48,39 @@ async def async_setup_entry(
     # tentativo di setup per il secondo.
     await coordinator.async_config_entry_first_refresh()
 
+    # DataUpdateCoordinator arma il timer periodico solo se ha almeno un
+    # ascoltatore. Questo coordinator esiste per produrre un effetto (pubblicare
+    # sul pannello), non per servire dati a delle entita': senza un ascoltatore
+    # proprio pubblicherebbe una volta sola all'avvio e mai piu'. Le entita'
+    # diagnostiche di un task futuro diventeranno ascoltatori vere, ma la
+    # correttezza non deve dipendere dalla loro esistenza.
+    entry.async_on_unload(coordinator.async_add_listener(lambda: None))
+
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    entry.async_on_unload(entry.add_update_listener(_ricarica_su_cambio_opzioni))
     return True
+
+
+async def _ricarica_su_cambio_opzioni(
+    hass: HomeAssistant, entry: SwitchBotEinkConfigEntry
+) -> None:
+    """Ricarica la entry quando l'utente cambia calendari o intervallo.
+
+    `async_update_entry` risveglia questo listener anche quando cambia solo
+    `entry.data` — un token rinnovato, un nuovo id di template — non solo
+    quando cambiano le opzioni. Ricaricare in quel caso sarebbe uno spreco e
+    aprirebbe un ciclo: il reload pubblica, la pubblicazione ripersiste i dati,
+    i dati risvegliano di nuovo questo listener. Si ricarica solo se le opzioni
+    sono davvero diverse da quelle con cui il coordinator attuale e' stato
+    creato.
+    """
+    coordinator = entry.runtime_data
+    if dict(entry.options) == coordinator.opzioni_iniziali:
+        return
+    _LOGGER.debug("Opzioni cambiate, ricarico la entry %s", entry.entry_id)
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(

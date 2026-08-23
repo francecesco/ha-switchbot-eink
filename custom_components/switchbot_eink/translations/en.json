@@ -39,7 +39,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Update interval",
+        "title": "Update and calendars",
         "data": {
           "update_interval": "Seconds between publishes",
           "calendars": "Calendars to show"

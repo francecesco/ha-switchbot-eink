@@ -230,7 +230,7 @@ class SwitchBotEinkConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class SwitchBotEinkOptionsFlow(OptionsFlow):
-    """Un solo campo: ogni quanto ripubblicare."""
+    """Ogni quanto ripubblicare, e quali calendari mostrare in agenda."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

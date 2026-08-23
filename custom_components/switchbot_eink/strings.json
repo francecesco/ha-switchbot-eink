@@ -39,7 +39,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Intervallo di aggiornamento",
+        "title": "Aggiornamento e calendari",
         "data": {
           "update_interval": "Secondi fra una pubblicazione e l'altra",
           "calendars": "Calendari da mostrare"

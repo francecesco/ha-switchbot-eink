@@ -221,11 +221,16 @@ def build_agenda_page(
     calendars: Sequence[str] | None = None,
     page_slot: str = "home",
     name: str = "Agenda",
+    stamp: bool = True,
 ) -> dict[str, Any]:
     """Costruisce la definizione di pagina dell'agenda.
 
     `calendars` sono i calendari *scelti dall'utente*, non quelli che oggi hanno
     eventi: i marcatori non devono sparire quando un calendario e' vuoto.
+
+    `stamp=False` omette la card "agg. HH:MM": chi confronta due pagine per
+    decidere se ripubblicare deve poter escludere l'orario, altrimenti cambia
+    ad ogni minuto e il confronto non serve a niente.
     """
     oggi = now.date()
     giorni = [oggi + timedelta(days=scarto) for scarto in range(FINESTRA_GIORNI)]
@@ -268,14 +273,15 @@ def build_agenda_page(
                 )
             )
 
-    cards.append(
-        _card(
-            f"agg. {now.strftime('%H:%M')}",
-            (360, _Y_AGGIORNAMENTO, 200, 22),
-            _CORPO_AGGIORNAMENTO,
-            "right",
+    if stamp:
+        cards.append(
+            _card(
+                f"agg. {now.strftime('%H:%M')}",
+                (360, _Y_AGGIORNAMENTO, 200, 22),
+                _CORPO_AGGIORNAMENTO,
+                "right",
+            )
         )
-    )
 
     return {"page": page_slot, "name": name, "cards": cards}
 

@@ -1,9 +1,9 @@
-"""Test del coordinator: agenda dai calendari, hash, token, errori."""
+"""Test del coordinator: agenda dai calendari, hash, token, errori, ciclo di vita."""
 from __future__ import annotations
 
 import json
 from datetime import timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant, SupportsResponse
@@ -30,6 +30,8 @@ from custom_components.switchbot_eink.const import (
     MIN_PUBLISH_INTERVAL,
 )
 from custom_components.switchbot_eink.coordinator import SwitchBotEinkCoordinator
+from custom_components.switchbot_eink.layout.agenda import FINESTRA_GIORNI
+from custom_components.switchbot_eink.layout.schema import validate_page
 
 TOKENS = Tokens(access_token="AT", refresh_token="RT", token_type="Bearer")
 
@@ -40,28 +42,47 @@ DATI_BASE = {
     CONF_TOKEN_TYPE: "Bearer",
 }
 
+# Istante fisso per congelare l'orologio in tutti i test che dipendono da
+# "adesso": un'ora assoluta del giorno farebbe sparire o restare gli eventi
+# scritti come offset a seconda di quando gira la suite (il filtro sui
+# conclusi), e un evento a "now + 30 min" scritto senza congelare l'orologio
+# fallisce fra le 23:30 e mezzanotte, quando l'offset scavalca il giorno.
+# E' il terzo caso di questo accoppiamento nel progetto.
+ADESSO_UTC = "2026-08-23T20:24:00+00:00"  # 13:24 locale in US/Pacific (fuso di test)
 
-def _registra_get_events(hass: HomeAssistant, risposta: dict) -> None:
+
+def _registra_get_events(hass: HomeAssistant, risposta: dict) -> list[dict]:
+    """Registra un `calendar.get_events` finto; ritorna le richieste ricevute."""
+    richieste: list[dict] = []
+
     async def handler(call):
+        richieste.append(dict(call.data))
         return risposta
 
     hass.services.async_register(
         "calendar", "get_events", handler, supports_response=SupportsResponse.ONLY
     )
+    return richieste
 
 
-async def _con_un_evento(hass: HomeAssistant, entity_id: str = "calendar.lavoro") -> None:
-    """Registra un calendario con un evento oggi, ancorato ad ADESSO.
+def _con_un_evento(
+    hass: HomeAssistant,
+    entity_id: str = "calendar.lavoro",
+    nome: str = "Lavoro",
+    minuti_da_ora: int = 30,
+    durata_minuti: int = 60,
+) -> list[dict]:
+    """Registra un calendario con un evento oggi, ancorato a dt_util.now().
 
-    Ancorato a un offset da `dt_util.now()` invece che a un'ora assoluta: un
-    orario fisso sparirebbe o resterebbe a seconda di quando gira il test,
-    perche' l'agenda filtra gli eventi gia' conclusi (vedi tests/layout/test_agenda.py).
+    Va sempre usato con l'orologio congelato (`freezer.move_to(ADESSO_UTC)`):
+    l'offset da "adesso" risolve il problema dell'ora assoluta ma non quello
+    del confine di mezzanotte, che solo congelare l'istante elimina.
     """
-    hass.states.async_set(entity_id, "on", {"friendly_name": "Lavoro"})
+    hass.states.async_set(entity_id, "on", {"friendly_name": nome})
     adesso = dt_util.now()
-    inizio = adesso + timedelta(minutes=30)
-    fine = inizio + timedelta(hours=1)
-    _registra_get_events(
+    inizio = adesso + timedelta(minutes=minuti_da_ora)
+    fine = inizio + timedelta(minutes=durata_minuti)
+    return _registra_get_events(
         hass,
         {
             entity_id: {
@@ -106,73 +127,456 @@ def client():
     return mock
 
 
-async def test_la_prima_pubblicazione_aggiorna_e_rilascia(
-    hass: HomeAssistant, entry, client
-) -> None:
+@pytest.fixture
+def coordinator(hass: HomeAssistant, entry, client) -> SwitchBotEinkCoordinator:
+    """Un'istanza pronta, per i test che non dipendono da un istante congelato."""
     entry.add_to_hass(hass)
-    await _con_un_evento(hass)
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
+    return SwitchBotEinkCoordinator(hass, entry, client)
 
-    assert await coordinator.async_publish() is True
+
+# ---- pubblicazione, hash, force, ciclo di vita -----------------------------
+
+
+async def test_la_prima_pubblicazione_aggiorna_e_rilascia(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    assert await coordinatore.async_publish() is True
     client.update_template.assert_awaited_once()
     client.release.assert_awaited_once_with("DEV1")
 
 
 async def test_non_ripubblica_se_l_hash_non_cambia(
-    hass: HomeAssistant, entry, client
+    hass: HomeAssistant, entry, client, freezer
 ) -> None:
+    freezer.move_to(ADESSO_UTC)
     entry.add_to_hass(hass)
-    await _con_un_evento(hass)
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
+    _con_un_evento(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
 
-    await coordinator.async_publish()
+    await coordinatore.async_publish()
     client.update_template.reset_mock()
     client.release.reset_mock()
 
-    assert await coordinator.async_publish() is False
+    assert await coordinatore.async_publish() is False
     client.update_template.assert_not_awaited()
     client.release.assert_not_awaited()
 
 
-async def test_force_ripubblica_anche_a_hash_invariato(
-    hass: HomeAssistant, entry, client
+async def test_l_ora_di_aggiornamento_non_e_nell_hash(
+    hass: HomeAssistant, entry, client, freezer
 ) -> None:
+    """Regressione: la card 'agg. HH:MM' cambia ad ogni minuto. Se entrasse
+    nel confronto, l'hash non impedirebbe mai una pubblicazione."""
+    freezer.move_to(ADESSO_UTC)
     entry.add_to_hass(hass)
-    await _con_un_evento(hass)
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
+    _con_un_evento(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
 
-    await coordinator.async_publish()
+    assert await coordinatore.async_publish() is True
+    client.update_template.reset_mock()
     client.release.reset_mock()
+    freezer.tick(timedelta(minutes=3))
 
-    assert await coordinator.async_publish(force=True) is True
+    assert await coordinatore.async_publish() is False
+    client.update_template.assert_not_awaited()
+
+
+async def test_force_ripubblica_anche_a_hash_invariato(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    await coordinatore.async_publish()
+    client.release.reset_mock()
+    freezer.tick(timedelta(seconds=MIN_PUBLISH_INTERVAL + 1))
+
+    assert await coordinatore.async_publish(force=True) is True
     client.release.assert_awaited_once()
 
 
-async def test_crea_il_template_se_lo_slot_e_vuoto(hass: HomeAssistant, client) -> None:
+async def test_force_ravvicinati_rispettano_l_intervallo_minimo(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    assert await coordinatore.async_publish(force=True) is True
+    client.release.reset_mock()
+    freezer.tick(timedelta(seconds=10))
+
+    assert await coordinatore.async_publish(force=True) is False
+    client.release.assert_not_awaited()
+
+
+async def test_force_distanziati_pubblicano_entrambi(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    assert await coordinatore.async_publish(force=True) is True
+    client.release.reset_mock()
+    freezer.tick(timedelta(seconds=MIN_PUBLISH_INTERVAL + 1))
+
+    assert await coordinatore.async_publish(force=True) is True
+    client.release.assert_awaited_once()
+
+
+async def test_last_published_viene_aggiornato(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    assert coordinatore.last_published is None
+    await coordinatore.async_publish()
+    assert coordinatore.last_published == dt_util.utcnow()
+
+
+def test_config_entry_e_passato_alla_classe_base(coordinator, entry) -> None:
+    """Senza questo, `coordinator.config_entry` arriva da una ContextVar e nei
+    test (dove non c'e' nessun setup in corso) resta `None`."""
+    assert coordinator.config_entry is entry
+
+
+async def test_validate_page_viene_chiamata_prima_di_compilare(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """Va chiamata due volte: sulla pagina di confronto (senza stamp) e su
+    quella vera che finisce a `compile_page`. Verificare solo `.called`
+    lascerebbe sopravvivere la rimozione di una delle due chiamate, perche'
+    l'altra basterebbe a farlo scattare comunque."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    with patch(
+        "custom_components.switchbot_eink.coordinator.validate_page",
+        wraps=validate_page,
+    ) as spia:
+        await coordinatore.async_publish()
+
+    assert spia.call_count == 2
+
+
+# ---- creazione/riuso/recupero del template ---------------------------------
+
+
+async def test_crea_il_template_se_lo_slot_e_vuoto(
+    hass: HomeAssistant, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
     entry = MockConfigEntry(domain=DOMAIN, unique_id="DEV1", data=dict(DATI_BASE))
     entry.add_to_hass(hass)
     client.list_templates = AsyncMock(return_value=[])
 
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
-    assert await coordinator.async_publish() is True
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    assert await coordinatore.async_publish() is True
 
     client.create_template.assert_awaited_once()
     client.update_template.assert_not_awaited()
 
+    template_creato = client.create_template.await_args.args[0]
+    assert template_creato.components  # mai [], o il canvas resterebbe vuoto
+    assert entry.data[CONF_TEMPLATE_ID] == 77  # id restituito dal mock
+
+
+async def test_riusa_un_template_gia_presente_sullo_slot(
+    hass: HomeAssistant, client, freezer
+) -> None:
+    """Nessun `template_id` in cache, ma uno esiste gia' sul device per lo
+    slot: va aggiornato quello, non ricreato un altro."""
+    freezer.move_to(ADESSO_UTC)
+    entry = MockConfigEntry(domain=DOMAIN, unique_id="DEV1", data=dict(DATI_BASE))
+    entry.add_to_hass(hass)
+    client.list_templates = AsyncMock(
+        return_value=[TemplateSummary(template_id=55, name="Vecchia", page_slot="home")]
+    )
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    assert await coordinatore.async_publish() is True
+
+    client.update_template.assert_awaited_once()
+    client.create_template.assert_not_awaited()
+    template_aggiornato = client.update_template.await_args.args[0]
+    assert template_aggiornato.template_id == 55
+    assert entry.data[CONF_TEMPLATE_ID] == 55
+
+
+async def test_il_template_cancellato_dall_app_viene_ricreato(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """Se il backend rifiuta l'update perche' il template non c'e' piu' (un
+    utente puo' cancellarlo dall'app SwitchBot), un solo tentativo di
+    recupero: dimenticare l'id e ripartire da list/create."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)  # CONF_TEMPLATE_ID = 77, ora invalido sul backend
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(
+        side_effect=SwitchBotCanvasApiError(190001, "template not exist")
+    )
+    client.list_templates = AsyncMock(return_value=[])  # lo slot e' davvero vuoto
+    client.create_template = AsyncMock(return_value=999)
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    assert await coordinatore.async_publish() is True
+
+    client.create_template.assert_awaited_once()
+    assert entry.data[CONF_TEMPLATE_ID] == 999
+
+
+# ---- errori: auth, transitori --------------------------------------------
+
+
+async def test_auth_ok_diventa_falso_e_scatena_il_reauth(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(side_effect=SwitchBotCanvasAuthError("scaduto"))
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinatore.async_publish()
+
+    assert coordinatore.auth_ok is False
+
+
+async def test_auth_ok_torna_vero_dopo_un_recupero(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(side_effect=SwitchBotCanvasAuthError("scaduto"))
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinatore.async_publish()
+    assert coordinatore.auth_ok is False
+
+    client.update_template = AsyncMock()  # il login e' stato rifatto altrove
+    freezer.tick(timedelta(seconds=MIN_PUBLISH_INTERVAL + 1))
+
+    assert await coordinatore.async_publish(force=True) is True
+    assert coordinatore.auth_ok is True
+
+
+async def test_errore_transitorio_diventa_updatefailed(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    _con_un_evento(hass)
+    client.update_template = AsyncMock(side_effect=SwitchBotCanvasApiError(500, "boom"))
+    client.list_templates = AsyncMock(
+        return_value=[TemplateSummary(template_id=77, name="Agenda", page_slot="home")]
+    )
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    with pytest.raises(UpdateFailed):
+        await coordinatore.async_publish()
+
+
+# ---- conversione degli eventi (unita', diretta su _evento_da_payload) -----
+
+
+def test_evento_di_tutto_il_giorno_e_riconosciuto(coordinator) -> None:
+    evento = coordinator._evento_da_payload(
+        {"start": "2026-08-23", "end": "2026-08-24", "summary": "Ferie"}, "Lavoro"
+    )
+    assert evento is not None
+    assert evento.all_day is True
+
+
+def test_evento_con_orario_non_e_tutto_il_giorno(coordinator) -> None:
+    evento = coordinator._evento_da_payload(
+        {
+            "start": "2026-08-23T09:00:00+00:00",
+            "end": "2026-08-23T10:00:00+00:00",
+            "summary": "Riunione",
+        },
+        "Lavoro",
+    )
+    assert evento is not None
+    assert evento.all_day is False
+
+
+def test_start_e_end_non_sono_scambiati(coordinator) -> None:
+    evento = coordinator._evento_da_payload(
+        {
+            "start": "2026-08-23T09:00:00+00:00",
+            "end": "2026-08-23T10:00:00+00:00",
+            "summary": "x",
+        },
+        "Lavoro",
+    )
+    assert evento is not None
+    assert evento.start < evento.end
+
+
+def test_il_titolo_arriva_dal_summary(coordinator) -> None:
+    evento = coordinator._evento_da_payload(
+        {
+            "start": "2026-08-23T09:00:00+00:00",
+            "end": "2026-08-23T10:00:00+00:00",
+            "summary": "Colloquio",
+        },
+        "Lavoro",
+    )
+    assert evento is not None
+    assert evento.summary == "Colloquio"
+
+
+def test_l_orario_viene_convertito_al_fuso_locale(coordinator) -> None:
+    """L'istanza di test e' in US/Pacific (PDT, UTC-7 il 23 agosto): un evento
+    alle 23:00 UTC deve arrivare come le 16:00 locali, non restare naive alle
+    23 come se il fuso non fosse mai stato applicato."""
+    evento = coordinator._evento_da_payload(
+        {
+            "start": "2026-08-23T23:00:00+00:00",
+            "end": "2026-08-24T00:00:00+00:00",
+            "summary": "x",
+        },
+        "Lavoro",
+    )
+    assert evento is not None
+    assert evento.start.hour == 16
+
+
+def test_un_evento_senza_end_viene_scartato(coordinator) -> None:
+    evento = coordinator._evento_da_payload(
+        {"start": "2026-08-23T09:00:00+00:00", "summary": "Rotto"}, "Lavoro"
+    )
+    assert evento is None
+
+
+def test_un_evento_con_data_illeggibile_viene_scartato(coordinator) -> None:
+    evento = coordinator._evento_da_payload(
+        {"start": "non-una-data", "end": "boh", "summary": "Rotto"}, "Lavoro"
+    )
+    assert evento is None
+
+
+async def test_un_evento_malformato_non_azzera_l_agenda(
+    hass: HomeAssistant, entry, client, freezer
+) -> None:
+    """Un evento rotto costa il suo evento, non l'intera pagina."""
+    freezer.move_to(ADESSO_UTC)
+    entry.add_to_hass(hass)
+    hass.states.async_set("calendar.lavoro", "on", {"friendly_name": "Lavoro"})
+    adesso = dt_util.now()
+    inizio = adesso + timedelta(minutes=30)
+    fine = inizio + timedelta(minutes=60)
+    _registra_get_events(
+        hass,
+        {
+            "calendar.lavoro": {
+                "events": [
+                    {
+                        "start": inizio.isoformat(),
+                        "end": fine.isoformat(),
+                        "summary": "Riunione",
+                    },
+                    {"start": "non-una-data", "summary": "Rotto"},
+                ]
+            }
+        },
+    )
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    assert await coordinatore.async_publish() is True
+    template = client.update_template.await_args.args[0]
+    testi = _testi_delle_card(template)
+    assert any(t and "Riunione" in t for t in testi)
+
+
+async def test_un_calendario_inesistente_viene_ignorato(
+    hass: HomeAssistant, client, freezer
+) -> None:
+    """Un calendario tolto dall'utente non deve rompere il ciclo per sempre."""
+    freezer.move_to(ADESSO_UTC)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="DEV1",
+        data={**DATI_BASE, CONF_TEMPLATE_ID: 77},
+        options={CONF_CALENDARS: ["calendar.lavoro", "calendar.fantasma"]},
+    )
+    entry.add_to_hass(hass)
+    hass.states.async_set("calendar.lavoro", "on", {"friendly_name": "Lavoro"})
+    # "calendar.fantasma" non ha nessuno stato: e' come se fosse stato rimosso.
+    richieste = _registra_get_events(hass, {"calendar.lavoro": {"events": []}})
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    assert await coordinatore.async_publish() is True
+    assert richieste[0]["entity_id"] == ["calendar.lavoro"]
+
+
+# ---- argomenti della chiamata al servizio ----------------------------------
+
+
+async def test_la_richiesta_al_servizio_include_tutti_i_calendari_e_la_finestra(
+    hass: HomeAssistant, client, freezer
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="DEV1",
+        data={**DATI_BASE, CONF_TEMPLATE_ID: 77},
+        options={CONF_CALENDARS: ["calendar.lavoro", "calendar.personale"]},
+    )
+    entry.add_to_hass(hass)
+    hass.states.async_set("calendar.lavoro", "on", {"friendly_name": "Lavoro"})
+    hass.states.async_set("calendar.personale", "on", {"friendly_name": "Personale"})
+    richieste = _registra_get_events(hass, {})
+
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    await coordinatore.async_publish()
+
+    assert len(richieste) == 1
+    chiamata = richieste[0]
+    assert set(chiamata["entity_id"]) == {"calendar.lavoro", "calendar.personale"}
+    inizio_atteso = dt_util.start_of_local_day()
+    assert chiamata["start_date_time"] == inizio_atteso
+    assert chiamata["end_date_time"] - chiamata["start_date_time"] == timedelta(
+        days=FINESTRA_GIORNI
+    )
+
+
+# ---- marcatori e agenda vuota -----------------------------------------------
+
 
 async def test_nessun_calendario_scelto_produce_l_agenda_vuota_senza_eccezioni(
-    hass: HomeAssistant, client
+    hass: HomeAssistant, client, freezer
 ) -> None:
     """Stato iniziale dopo l'installazione: nessuna eccezione, agenda vuota."""
+    freezer.move_to(ADESSO_UTC)
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="DEV1",
         data={**DATI_BASE, CONF_TEMPLATE_ID: 77},
     )
     entry.add_to_hass(hass)
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
 
-    assert await coordinator.async_publish() is True
+    assert await coordinatore.async_publish() is True
 
     template = client.update_template.await_args.args[0]
     assert any(
@@ -182,7 +586,7 @@ async def test_nessun_calendario_scelto_produce_l_agenda_vuota_senza_eccezioni(
 
 
 async def test_i_marcatori_restano_anche_se_un_calendario_non_ha_eventi(
-    hass: HomeAssistant, client
+    hass: HomeAssistant, client, freezer
 ) -> None:
     """`calendars` deve arrivare dalle opzioni, non dedotto dagli eventi presenti.
 
@@ -191,6 +595,7 @@ async def test_i_marcatori_restano_anche_se_un_calendario_non_ha_eventi(
     `build_agenda_page`, i nomi verrebbero dedotti dai soli eventi effettivi
     (un solo calendario) e i marcatori sparirebbero del tutto.
     """
+    freezer.move_to(ADESSO_UTC)
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="DEV1",
@@ -199,39 +604,16 @@ async def test_i_marcatori_restano_anche_se_un_calendario_non_ha_eventi(
     )
     entry.add_to_hass(hass)
     hass.states.async_set("calendar.personale", "on", {"friendly_name": "Personale"})
-    await _con_un_evento(hass)
+    _con_un_evento(hass)
 
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
-    assert await coordinator.async_publish() is True
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    assert await coordinatore.async_publish() is True
 
     template = client.update_template.await_args.args[0]
     assert "L" in _testi_delle_card(template)
 
 
-async def test_auth_ok_diventa_falso_e_scatena_il_reauth(
-    hass: HomeAssistant, entry, client
-) -> None:
-    entry.add_to_hass(hass)
-    await _con_un_evento(hass)
-    client.update_template = AsyncMock(side_effect=SwitchBotCanvasAuthError("scaduto"))
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
-
-    with pytest.raises(ConfigEntryAuthFailed):
-        await coordinator.async_publish()
-
-    assert coordinator.auth_ok is False
-
-
-async def test_errore_transitorio_diventa_updatefailed(
-    hass: HomeAssistant, entry, client
-) -> None:
-    entry.add_to_hass(hass)
-    await _con_un_evento(hass)
-    client.update_template = AsyncMock(side_effect=SwitchBotCanvasApiError(500, "boom"))
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
-
-    with pytest.raises(UpdateFailed):
-        await coordinator.async_publish()
+# ---- opzioni e intervallo di pianificazione --------------------------------
 
 
 async def test_l_intervallo_minimo_e_imposto_anche_se_le_opzioni_lo_violano(
@@ -245,20 +627,21 @@ async def test_l_intervallo_minimo_e_imposto_anche_se_le_opzioni_lo_violano(
     )
     entry.add_to_hass(hass)
 
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
 
-    assert coordinator.update_interval == timedelta(seconds=MIN_PUBLISH_INTERVAL)
+    assert coordinatore.update_interval == timedelta(seconds=MIN_PUBLISH_INTERVAL)
 
 
 async def test_i_token_rinnovati_vengono_ripersistiti(
-    hass: HomeAssistant, entry, client
+    hass: HomeAssistant, entry, client, freezer
 ) -> None:
+    freezer.move_to(ADESSO_UTC)
     entry.add_to_hass(hass)
-    await _con_un_evento(hass)
+    _con_un_evento(hass)
     client.tokens = Tokens(access_token="NUOVO", refresh_token="RT2", token_type="Bearer")
-    coordinator = SwitchBotEinkCoordinator(hass, entry, client)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
 
-    await coordinator.async_publish()
+    await coordinatore.async_publish()
 
     assert entry.data[CONF_ACCESS_TOKEN] == "NUOVO"
     assert entry.data[CONF_REFRESH_TOKEN] == "RT2"
