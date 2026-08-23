@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "SwitchBot E-Ink Home Dashboard",
+        "description": "Sign in with your SwitchBot account. Your password is not stored — only the refresh token is kept.",
+        "data": {
+          "username": "Email",
+          "password": "Password",
+          "region": "Region"
+        }
+      },
+      "device": {
+        "title": "Choose the panel",
+        "data": {
+          "device_id": "Panel"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "The token for {username} is no longer valid. Enter the password to renew it.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials, or the service is unreachable."
+    },
+    "abort": {
+      "no_devices_found": "No e-ink panel found on this account.",
+      "already_configured": "This panel is already configured.",
+      "reauth_successful": "Authentication renewed."
+    }
+  }
+}
