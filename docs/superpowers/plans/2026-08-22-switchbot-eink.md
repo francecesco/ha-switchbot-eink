@@ -3476,10 +3476,10 @@ git commit -m "feat(layout): compila le pagine validate in componenti wire"
   "name": "SwitchBot E-Ink Home Dashboard",
   "codeowners": [],
   "config_flow": true,
-  "documentation": "https://github.com/fnegretti/switchbot-eink",
+  "documentation": "https://github.com/francecesco/switchbot-eink",
   "integration_type": "device",
   "iot_class": "cloud_push",
-  "issue_tracker": "https://github.com/fnegretti/switchbot-eink/issues",
+  "issue_tracker": "https://github.com/francecesco/switchbot-eink/issues",
   "requirements": [],
   "version": "0.1.0"
 }
