@@ -21,6 +21,20 @@ def page_slot_to_sort_order(page_slot: str) -> int:
     return int(match.group(1)) if match else 0
 
 
+def sort_order_to_page_slot(sort_order: int, template_type: int) -> str:
+    """Ricava lo slot da `sortOrder` e `templateType`.
+
+    La risposta del backend non contiene lo slot: va dedotto. Servono entrambi i
+    campi, perche' la home e `custom1` hanno tutti e due `sortOrder` 1 e si
+    distinguono solo per `templateType`.
+    """
+    if template_type == 1:
+        return "home"
+    if 1 <= sort_order <= 4:
+        return f"custom{sort_order}"
+    return "unassigned"
+
+
 @dataclass(frozen=True, slots=True)
 class Device:
     """Un dispositivo dell'account."""
@@ -47,6 +61,7 @@ class TemplateSummary:
     template_id: int
     name: str
     page_slot: str
+    template_type: int = 0
 
 
 @dataclass(slots=True)

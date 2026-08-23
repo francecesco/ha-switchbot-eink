@@ -17,6 +17,7 @@ from custom_components.switchbot_eink.api.models import (
     Template,
     page_slot_to_sort_order,
     page_slot_to_template_type,
+    sort_order_to_page_slot,
 )
 from tests.api.helpers import response_sequence
 
@@ -57,6 +58,68 @@ def test_slot_custom_mappa_su_template_type_0() -> None:
 
 def test_slot_sconosciuto_ha_sort_order_zero() -> None:
     assert page_slot_to_sort_order("unassigned") == 0
+
+
+def test_slot_dedotto_dalla_home() -> None:
+    assert sort_order_to_page_slot(1, 1) == "home"
+
+
+def test_slot_dedotto_dalle_pagine_custom() -> None:
+    assert sort_order_to_page_slot(1, 0) == "custom1"
+    assert sort_order_to_page_slot(4, 0) == "custom4"
+
+
+def test_slot_dedotto_fuori_intervallo_e_unassigned() -> None:
+    assert sort_order_to_page_slot(0, 0) == "unassigned"
+    assert sort_order_to_page_slot(9, 0) == "unassigned"
+
+
+async def test_list_templates_deduce_lo_slot_dai_campi_reali(aioclient, client) -> None:
+    """La risposta non contiene pageSlot: lo slot va dedotto da sortOrder e templateType.
+
+    Questo payload e' copiato da una risposta reale del backend. La home e
+    custom1 hanno entrambe sortOrder 1: guardare solo quello le confonderebbe.
+    """
+    aioclient.post(
+        f"{BASE}/web/v1/user/templates/list",
+        json={
+            "resultCode": 100,
+            "data": {
+                "total": 3,
+                "items": [
+                    {"templateId": 1105, "name": "Home template", "sortOrder": 1,
+                     "templateType": 1, "deviceID": "A", "enabled": True},
+                    {"templateId": 580, "name": "Untitled template", "sortOrder": 1,
+                     "templateType": 0, "deviceID": "A", "enabled": True},
+                    {"templateId": 1316, "name": "Untitled template", "sortOrder": 2,
+                     "templateType": 0, "deviceID": "A", "enabled": True},
+                ],
+            },
+        },
+    )
+
+    summaries = await client.list_templates("A")
+
+    assert [s.page_slot for s in summaries] == ["home", "custom1", "custom2"]
+    assert [s.template_id for s in summaries] == [1105, 580, 1316]
+    assert summaries[0].template_type == 1
+
+
+async def test_list_templates_non_cerca_una_chiave_page_slot(aioclient, client) -> None:
+    """Regressione: cercare `pageSlot` dava `unassigned` a tutto e faceva fallire il filtro."""
+    aioclient.post(
+        f"{BASE}/web/v1/user/templates/list",
+        json={
+            "resultCode": 100,
+            "data": {"items": [
+                {"templateId": 7, "name": "x", "sortOrder": 3, "templateType": 0}
+            ]},
+        },
+    )
+
+    summaries = await client.list_templates("A")
+
+    assert summaries[0].page_slot == "custom3"
 
 
 async def test_list_eink_devices_filtra_per_tipo_e_condivisione(aioclient, client) -> None:

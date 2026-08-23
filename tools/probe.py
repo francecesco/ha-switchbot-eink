@@ -200,13 +200,21 @@ async def _publish(
     components: list[dict[str, str]],
 ) -> None:
     """Riusa il template già presente sullo slot, altrimenti ne crea uno."""
-    existing = [t for t in await client.list_templates(device_id) if t.page_slot == slot]
+    tutti = await client.list_templates(device_id)
+    existing = [t for t in tutti if t.page_slot == slot]
+
+    if tutti:
+        print("Template gia' presenti sul pannello:")
+        for summary in tutti:
+            print(f"  id {summary.template_id:<6} slot {summary.page_slot:<11} {summary.name}")
+
     if len(existing) > 1:
         print(
             f"Attenzione: sullo slot {slot} ci sono {len(existing)} template. "
             f"Aggiorno il primo (id {existing[0].template_id}); gli altri restano inutilizzati "
             "e potrebbero confondere la misura."
         )
+
     template = Template(
         template_id=existing[0].template_id if existing else None,
         name=name,
@@ -218,8 +226,8 @@ async def _publish(
         template.template_id = await client.create_template(template)
         print(f"Creato template {template.template_id} sullo slot {slot}")
     else:
+        print(f"Sovrascrivo il template {template.template_id} sullo slot {slot}")
         await client.update_template(template)
-        print(f"Aggiornato template {template.template_id} sullo slot {slot}")
 
     await client.release(device_id)
     print("Pubblicato. Scorri fino alla pagina custom sul dispositivo.")

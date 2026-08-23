@@ -18,7 +18,7 @@ from .const import (
 )
 from .envelope import build_auth_header, device_base_url, productbiz_base_url, unwrap_backend
 from .http import CanvasHttp
-from .models import Device, Template, TemplateSummary
+from .models import Device, Template, TemplateSummary, sort_order_to_page_slot
 
 
 class SwitchBotCanvasClient:
@@ -84,14 +84,19 @@ class SwitchBotCanvasClient:
     async def list_templates(self, device_id: str) -> list[TemplateSummary]:
         payload = await self._http.request(PATH_TPL_LIST, {"deviceID": device_id})
         items = (payload or {}).get("items", []) if isinstance(payload, dict) else []
-        return [
-            TemplateSummary(
-                template_id=int(item["templateId"]),
-                name=str(item.get("name", "")),
-                page_slot=str(item.get("pageSlot", "unassigned")),
+        summaries = []
+        for item in items:
+            template_type = int(item.get("templateType", 0))
+            sort_order = int(item.get("sortOrder", 0))
+            summaries.append(
+                TemplateSummary(
+                    template_id=int(item["templateId"]),
+                    name=str(item.get("name", "")),
+                    page_slot=sort_order_to_page_slot(sort_order, template_type),
+                    template_type=template_type,
+                )
             )
-            for item in items
-        ]
+        return summaries
 
     async def create_template(self, template: Template) -> int:
         body = {
