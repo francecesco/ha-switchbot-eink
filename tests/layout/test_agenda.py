@@ -400,7 +400,10 @@ def _pagine_estreme() -> list[dict]:
     pieni = [evento_attivo(10 * i, f"{lungo} {i}") for i in range(MAX_EVENTI_OGGI + 4)]
     return [
         build_agenda_page([], ADESSO),
-        build_agenda_page([evento(9, "x")], ADESSO),
+        # Attivo, non alle 9: con ADESSO alle 17:24 un evento del mattino e' gia'
+        # concluso e la forma collasserebbe nel segnaposto, senza mai esercitare
+        # la geometria di una riga singola.
+        build_agenda_page([evento_attivo(30, "x")], ADESSO),
         build_agenda_page(pieni, ADESSO),
         build_agenda_page(pieni, ADESSO, calendars=["Lavoro", "Famiglia"]),
         build_agenda_page(
