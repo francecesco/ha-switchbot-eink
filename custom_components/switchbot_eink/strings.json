@@ -46,5 +46,23 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "ultima_pubblicazione": {
+        "name": "Ultima pubblicazione"
+      }
+    },
+    "binary_sensor": {
+      "autenticazione": {
+        "name": "Autenticazione"
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Aggiorna la dashboard",
+      "description": "Ricompila l'agenda e la pubblica sul pannello, anche se il contenuto non è cambiato."
+    }
   }
 }

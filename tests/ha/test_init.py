@@ -203,8 +203,13 @@ async def test_unload_invoca_async_unload_platforms(hass: HomeAssistant, entry) 
     Con `PLATFORMS = [Platform.BINARY_SENSOR, Platform.SENSOR]` (entita'
     diagnostiche di questo task) questo e' tornato un test di comportamento
     vero: la spia verifica che le due piattaforme reali vengano scaricate
-    davvero, non piu' solo che una lista vuota venga passata a un no-op.
+    davvero, non piu' solo che una lista vuota venga passata a un no-op — per
+    questo l'asserzione controlla anche gli argomenti, non solo che la
+    chiamata avvenga: `async_unload_platforms(entry, [])` la farebbe comunque
+    scattare.
     """
+    from custom_components.switchbot_eink import PLATFORMS
+
     entry.add_to_hass(hass)
 
     with patch(PERCORSO_CLIENT) as client_cls:
@@ -221,7 +226,8 @@ async def test_unload_invoca_async_unload_platforms(hass: HomeAssistant, entry) 
                 assert await hass.config_entries.async_unload(entry.entry_id)
                 await hass.async_block_till_done()
 
-    unload_platforms_spia.assert_awaited_once()
+    unload_platforms_spia.assert_awaited_once_with(entry, PLATFORMS)
+    assert PLATFORMS, "la spia non discriminerebbe nulla se fosse vuota"
 
 
 async def test_il_token_type_non_ignorato_nella_costruzione_del_client(

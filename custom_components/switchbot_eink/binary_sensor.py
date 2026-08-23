@@ -8,17 +8,14 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_DEVICE_ID, CONF_DEVICE_NAME, DOMAIN
 from .coordinator import SwitchBotEinkConfigEntry, SwitchBotEinkCoordinator
+from .entity import PanelDiagnosticEntity
 
 DESCRIPTION = BinarySensorEntityDescription(
     key="auth",
-    translation_key="auth",
-    name="Autenticazione",
+    translation_key="autenticazione",
     device_class=BinarySensorDeviceClass.PROBLEM,
     entity_category=EntityCategory.DIAGNOSTIC,
 )
@@ -32,28 +29,15 @@ async def async_setup_entry(
     async_add_entities([AuthBinarySensor(entry.runtime_data, entry)])
 
 
-class AuthBinarySensor(
-    CoordinatorEntity[SwitchBotEinkCoordinator], BinarySensorEntity
-):
+class AuthBinarySensor(PanelDiagnosticEntity, BinarySensorEntity):
     """Acceso quando il token non è più valido: è una classe PROBLEM."""
 
-    _attr_has_entity_name = False
+    entity_description = DESCRIPTION
 
     def __init__(
         self, coordinator: SwitchBotEinkCoordinator, entry: SwitchBotEinkConfigEntry
     ) -> None:
-        super().__init__(coordinator)
-        self.entity_description = DESCRIPTION
-        device_id = entry.data[CONF_DEVICE_ID]
-        device_name = entry.data.get(CONF_DEVICE_NAME, "SwitchBot E-Ink")
-        self._attr_unique_id = f"{device_id}_auth"
-        self._attr_name = f"{device_name} autenticazione"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_id)},
-            name=device_name,
-            manufacturer="SwitchBot",
-            model="E-Ink Home Dashboard (W8902500)",
-        )
+        super().__init__(coordinator, entry, "auth")
 
     @property
     def is_on(self) -> bool:

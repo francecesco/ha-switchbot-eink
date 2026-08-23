@@ -7,7 +7,9 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.typing import ConfigType
 
 from .api.auth import Tokens
 from .api.client import SwitchBotCanvasClient
@@ -28,6 +30,21 @@ _LOGGER = logging.getLogger(__name__)
 # ascoltatori veri del coordinator (vedi il commento sull'ascoltatore finto
 # piu' sotto).
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Registra i servizi del dominio.
+
+    Un servizio va registrato qui, non in `async_setup_entry`: se vivesse li'
+    sparirebbe per la finestra di un reload (unload seguito da un nuovo
+    setup della stessa entry), e un'automazione che chiamasse `refresh`
+    proprio in quella finestra fallirebbe con "servizio sconosciuto".
+    `async_setup` viene invocato una volta sola per l'intera vita di questa
+    istanza di Home Assistant, indipendentemente da quante entry esistono o
+    da quante volte vengono ricaricate: il servizio non va mai rimosso.
+    """
+    _register_services(hass)
+    return True
 
 
 async def async_setup_entry(
@@ -67,16 +84,15 @@ async def async_setup_entry(
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(_ricarica_su_cambio_opzioni))
-    _register_services(hass)
     return True
 
 
 def _register_services(hass: HomeAssistant) -> None:
-    """Registra il servizio `refresh` una sola volta, alla prima entry configurata."""
+    """Registra il servizio `refresh`. Chiamato da `async_setup`: non va mai rimosso."""
     if hass.services.has_service(DOMAIN, SERVICE_REFRESH):
         return
 
-    def _coordinators() -> list[SwitchBotEinkCoordinator]:
+    def _coordinatori_caricati() -> list[SwitchBotEinkCoordinator]:
         return [
             entry.runtime_data
             for entry in hass.config_entries.async_entries(DOMAIN)
@@ -84,14 +100,27 @@ def _register_services(hass: HomeAssistant) -> None:
         ]
 
     async def handle_refresh(call: ServiceCall) -> None:
-        for coordinator in _coordinators():
-            await coordinator.async_publish(force=True)
-            # `async_publish` chiamato cosi', fuori dal ciclo di
-            # `_async_refresh`, non passa mai da `async_update_listeners`:
-            # senza questa chiamata esplicita le entita' diagnostiche
-            # resterebbero ferme al valore del ciclo periodico precedente
-            # fino al prossimo giro del timer.
-            coordinator.async_update_listeners()
+        coordinatori = _coordinatori_caricati()
+        if not coordinatori:
+            raise HomeAssistantError(
+                "Nessun pannello SwitchBot E-Ink caricato: nulla da aggiornare"
+            )
+
+        # Il fan-out non si ferma al primo pannello guasto: un pannello rotto
+        # non deve impedire agli altri di aggiornarsi. Gli errori si
+        # accumulano e si sollevano tutti insieme alla fine.
+        errori: list[Exception] = []
+        for coordinator in coordinatori:
+            try:
+                await coordinator.async_forza_pubblicazione()
+            except HomeAssistantError as err:
+                errori.append(err)
+
+        if errori:
+            raise HomeAssistantError(
+                f"{len(errori)} pannello/i su {len(coordinatori)} non "
+                "aggiornato/i: " + "; ".join(str(err) for err in errori)
+            )
 
     hass.services.async_register(
         DOMAIN, SERVICE_REFRESH, handle_refresh, schema=vol.Schema({})
@@ -126,17 +155,10 @@ async def _ricarica_su_cambio_opzioni(
 async def async_unload_entry(
     hass: HomeAssistant, entry: SwitchBotEinkConfigEntry
 ) -> bool:
-    """Scarica la entry e, se era l'ultima, il servizio `refresh` con lei."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        # A questo punto il nucleo non ha ancora marcato `entry` come
-        # scaricata (lo fa dopo che questa funzione ritorna): va esclusa
-        # esplicitamente dal conteggio delle entry ancora caricate.
-        altre_caricate = [
-            e
-            for e in hass.config_entries.async_entries(DOMAIN)
-            if e.entry_id != entry.entry_id and e.state is ConfigEntryState.LOADED
-        ]
-        if not altre_caricate:
-            hass.services.async_remove(DOMAIN, SERVICE_REFRESH)
-    return unload_ok
+    """Scarica la entry.
+
+    Il servizio `refresh`, registrato a livello di dominio in `async_setup`,
+    non viene toccato: non e' legato al ciclo di vita di una singola entry, e
+    un servizio registrato a livello di dominio non va rimosso.
+    """
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

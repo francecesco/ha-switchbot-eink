@@ -46,5 +46,23 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "ultima_pubblicazione": {
+        "name": "Last published"
+      }
+    },
+    "binary_sensor": {
+      "autenticazione": {
+        "name": "Authentication"
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Refresh the dashboard",
+      "description": "Rebuilds the agenda and publishes it to the panel, even if nothing changed."
+    }
   }
 }

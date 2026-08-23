@@ -85,6 +85,10 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
         self._device_id: str = entry.data[CONF_DEVICE_ID]
         self._template_id: int | None = entry.data.get(CONF_TEMPLATE_ID)
         self._last_hash: str | None = None
+        # Consumato una volta sola dal ciclo successivo di `_async_update_data`:
+        # una forzatura vale per il giro che l'ha chiesta, non per tutti quelli
+        # dopo.
+        self._forza_prossimo: bool = False
 
         self.last_published: datetime | None = None
         self.auth_ok: bool = True
@@ -440,4 +444,22 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
         return True
 
     async def _async_update_data(self) -> None:
-        await self.async_publish()
+        forzato, self._forza_prossimo = self._forza_prossimo, False
+        await self.async_publish(force=forzato)
+
+    async def async_forza_pubblicazione(self) -> None:
+        """Chiede una pubblicazione forzata passando dal ciclo del coordinator.
+
+        Chiamare `async_publish` direttamente scavalcherebbe la macchina di
+        `_async_refresh` che avvia il reauth su token scaduto, notifica le
+        entita' diagnostiche e antepone un lucchetto al ciclo periodico:
+        quella macchina va attraversata, non aggirata. `force` viaggia con un
+        flag a colpo singolo perche' `_async_update_data` non accetta
+        argomenti (e' la firma richiesta da `DataUpdateCoordinator`).
+        """
+        self._forza_prossimo = True
+        await self.async_refresh()
+        if not self.last_update_success:
+            raise HomeAssistantError(
+                "Pubblicazione non riuscita"
+            ) from self.last_exception

@@ -10,17 +10,14 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_DEVICE_ID, CONF_DEVICE_NAME, DOMAIN
 from .coordinator import SwitchBotEinkConfigEntry, SwitchBotEinkCoordinator
+from .entity import PanelDiagnosticEntity
 
 DESCRIPTION = SensorEntityDescription(
     key="last_published",
-    translation_key="last_published",
-    name="Ultima pubblicazione",
+    translation_key="ultima_pubblicazione",
     device_class=SensorDeviceClass.TIMESTAMP,
     entity_category=EntityCategory.DIAGNOSTIC,
 )
@@ -34,26 +31,15 @@ async def async_setup_entry(
     async_add_entities([LastPublishedSensor(entry.runtime_data, entry)])
 
 
-class LastPublishedSensor(CoordinatorEntity[SwitchBotEinkCoordinator], SensorEntity):
+class LastPublishedSensor(PanelDiagnosticEntity, SensorEntity):
     """Orario dell'ultima pubblicazione riuscita."""
 
-    _attr_has_entity_name = False
+    entity_description = DESCRIPTION
 
     def __init__(
         self, coordinator: SwitchBotEinkCoordinator, entry: SwitchBotEinkConfigEntry
     ) -> None:
-        super().__init__(coordinator)
-        self.entity_description = DESCRIPTION
-        device_id = entry.data[CONF_DEVICE_ID]
-        device_name = entry.data.get(CONF_DEVICE_NAME, "SwitchBot E-Ink")
-        self._attr_unique_id = f"{device_id}_last_published"
-        self._attr_name = f"{device_name} ultima pubblicazione"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_id)},
-            name=device_name,
-            manufacturer="SwitchBot",
-            model="E-Ink Home Dashboard (W8902500)",
-        )
+        super().__init__(coordinator, entry, "last_published")
 
     @property
     def native_value(self) -> datetime | None:

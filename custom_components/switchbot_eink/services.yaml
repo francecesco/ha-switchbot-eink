@@ -1,5 +1,2 @@
 refresh:
-  name: Aggiorna la dashboard
-  description: >-
-    Ricompila l'agenda e la pubblica sul pannello, anche se il contenuto
-    non è cambiato.
+  fields: {}
