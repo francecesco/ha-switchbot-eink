@@ -191,3 +191,26 @@ def test_una_pagina_senza_card_e_valida() -> None:
     page = validate_page({"page": "custom1", "cards": []})
 
     assert page["cards"] == []
+
+
+def test_la_pagina_senza_slot_finisce_sulla_home() -> None:
+    """La home e' la pagina che il pannello mostra all'accensione: e' quella che
+    vogliamo, e non deve servire dichiararla."""
+    page = validate_page({"cards": [{"type": "text", "grid": [0, 0, 2, 1], "text": "x"}]})
+
+    assert page["page"] == "home"
+
+
+def test_la_home_e_uno_slot_ammesso() -> None:
+    page = validate_page(
+        {"page": "home", "cards": [{"type": "text", "grid": [0, 0, 2, 1], "text": "x"}]}
+    )
+
+    assert page["page"] == "home"
+
+
+def test_uno_slot_inventato_viene_rifiutato() -> None:
+    with pytest.raises(vol.Invalid):
+        validate_page(
+            {"page": "custom9", "cards": [{"type": "text", "grid": [0, 0, 2, 1], "text": "x"}]}
+        )

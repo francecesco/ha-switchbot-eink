@@ -8,7 +8,10 @@ import voluptuous as vol
 from .const import COLORS, DEFAULT_METRIC_TYPE, GRID_COLS, GRID_ROWS, METRIC_TYPES
 
 CARD_TYPES: tuple[str, ...] = ("metric", "text", "divider", "frame", "image")
-PAGE_SLOTS: tuple[str, ...] = ("custom1", "custom2", "custom3", "custom4")
+# La home e' la pagina che il pannello mostra all'accensione, ed e' quella su cui
+# lavoriamo: le custom esistono solo per chi vuole affiancarci altre schermate.
+PAGE_SLOTS: tuple[str, ...] = ("home", "custom1", "custom2", "custom3", "custom4")
+DEFAULT_PAGE_SLOT: str = "home"
 
 DEFAULT_PAGE_NAME = "Home Assistant"
 
@@ -101,7 +104,7 @@ CARD_SCHEMA = vol.Schema(
 
 PAGE_SCHEMA = vol.Schema(
     {
-        vol.Required("page"): vol.In(PAGE_SLOTS),
+        vol.Optional("page", default=DEFAULT_PAGE_SLOT): vol.In(PAGE_SLOTS),
         vol.Optional("name", default=DEFAULT_PAGE_NAME): str,
         vol.Required("cards"): [CARD_SCHEMA],
     }
