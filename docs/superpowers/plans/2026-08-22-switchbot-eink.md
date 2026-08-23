@@ -5904,16 +5904,6 @@ ha quattro livelli di grigio.
 
 `switchbot_eink.refresh` ricompila e pubblica, anche a contenuto invariato.
 
-`switchbot_eink.push_text` sostituisce il testo di una card che abbia un campo
-`name`, e pubblica subito:
-
-```yaml
-action: switchbot_eink.push_text
-data:
-  card: avvisi
-  text: Pacco consegnato
-```
-
 ## Diagnostica
 
 Lo strato API si può eseguire da solo, senza Home Assistant:
