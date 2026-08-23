@@ -31,9 +31,24 @@ documentazione ufficiale e può cambiare senza preavviso.
 
 ## L'API privata
 
-Base URL: `https://wonderlabs.{region}.api.switchbot.net/productbiz`, con
-`region` ∈ `us` | `ap` | `eu` (default `us`; per l'Italia `eu`).
-Account service: `https://account.api.switchbot.net`.
+Ci sono **tre** URL base, non uno. Confonderli è costoso: una rotta inesistente
+su API Gateway di AWS risponde `403` con un messaggio sulle firme SigV4, che
+sembra un problema di autenticazione e non lo è.
+
+| Servizio | Base |
+|---|---|
+| Account | `https://account.api.switchbot.net` |
+| Dispositivi | `https://wonderlabs.{region}.api.switchbot.net` |
+| Template | `https://wonderlabs.{region}.api.switchbot.net/productbiz` |
+
+`region` ∈ `us` | `ap` | `eu` (default `us`; per l'Italia `eu`). La differenza fra
+le ultime due è visibile nel bundle del client web, dove il client dei template si
+costruisce con `J(e,t)` = `ut(e,t) + "/productbiz"` mentre quello dei dispositivi
+usa `ut(e,t)` da solo.
+
+Il modo di verificare a quale base risponde una rotta, senza credenziali: una
+richiesta con un token fasullo ottiene `401` se la rotta esiste e `403` se non
+esiste.
 
 Tutte le chiamate sono `POST` con `content-type: application/json` e header
 `Authorization: <access_token>`.
@@ -76,9 +91,11 @@ Su `401` il client web tenta un refresh e poi ripete la richiesta una volta sola
 
 ### Dispositivi e template
 
+Salvo `getDeviceList`, tutti i path che seguono stanno sulla base **template**.
+
 | Path | Body | Note |
 |---|---|---|
-| `/device/v1/manage/getDeviceList` | — | filtrare `deviceType == "W1070000"` e `isShare == false` |
+| `/device/v1/manage/getDeviceList` | — | **sulla base dispositivi, non su productbiz**; filtrare `deviceType == "W1070000"` e `isShare == false` |
 | `/web/v1/user/templates/list` | `{deviceID}` | |
 | `/web/v1/user/templates/info` | `{templateId, deviceID}` | |
 | `/web/v1/user/templates/create` | vedi sotto | ritorna il template con `templateId` |
