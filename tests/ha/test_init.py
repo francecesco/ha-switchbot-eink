@@ -368,3 +368,18 @@ async def test_dopo_lo_unload_il_coordinator_non_pubblica_piu(
                 await hass.async_block_till_done()
 
     assert publish_mock.await_count == conteggio_dopo_unload
+
+
+async def test_lintegrazione_porta_con_se_la_sua_icona(hass: HomeAssistant) -> None:
+    """Home Assistant serve le immagini di un'integrazione custom dalla sua
+    cartella `brand/`: se sparisse, l'icona tornerebbe il segnaposto."""
+    from pathlib import Path
+
+    from homeassistant.loader import async_get_integration
+
+    integrazione = await async_get_integration(hass, DOMAIN)
+
+    assert integrazione.has_branding
+    cartella = Path(integrazione.file_path) / "brand"
+    for nome in ("icon.png", "icon@2x.png", "dark_icon.png", "dark_icon@2x.png"):
+        assert (cartella / nome).is_file(), nome
