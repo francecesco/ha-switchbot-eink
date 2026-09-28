@@ -42,16 +42,13 @@ TEMI = {
 
 
 def disegna(tema: dict[str, tuple[int, int, int, int]]) -> Image.Image:
-    lato = LATO_DI_LAVORO
-    immagine = Image.new("RGBA", (lato, lato), (0, 0, 0, 0))
-    d = ImageDraw.Draw(immagine)
-
-    # Il pannello e' 5:3; lo si centra in verticale nel quadrato.
-    margine = 40
-    larghezza = lato - 2 * margine
+    """Il pannello da solo, senza spazio intorno: le specifiche delle immagini
+    di Home Assistant vogliono il soggetto ritagliato fino ai bordi."""
+    larghezza = LATO_DI_LAVORO
     altezza = int(larghezza * 0.66)
-    alto = (lato - altezza) // 2
-    x0, y0, x1, y1 = margine, alto, margine + larghezza, alto + altezza
+    immagine = Image.new("RGBA", (larghezza, altezza), (0, 0, 0, 0))
+    d = ImageDraw.Draw(immagine)
+    x0, y0, x1, y1 = 0, 0, larghezza - 1, altezza - 1
 
     d.rounded_rectangle((x0, y0, x1, y1), radius=70, fill=tema["cornice"])
     bordo = 44
@@ -86,14 +83,33 @@ def disegna(tema: dict[str, tuple[int, int, int, int]]) -> Image.Image:
     return immagine
 
 
+def _salva(immagine: Image.Image, nome: str) -> None:
+    percorso = DESTINAZIONE / nome
+    immagine.save(percorso, optimize=True)
+    print(percorso.relative_to(DESTINAZIONE.parent.parent.parent))
+
+
 def main() -> None:
     DESTINAZIONE.mkdir(parents=True, exist_ok=True)
     for tema, prefisso in (("chiaro", ""), ("scuro", "dark_")):
-        grande = disegna(TEMI[tema])
+        pannello = disegna(TEMI[tema])
         for lato, suffisso in ((256, ""), (512, "@2x")):
-            percorso = DESTINAZIONE / f"{prefisso}icon{suffisso}.png"
-            grande.resize((lato, lato), Image.Resampling.LANCZOS).save(percorso, optimize=True)
-            print(percorso.relative_to(DESTINAZIONE.parent.parent.parent))
+            # Icona: quadrata per specifica, col pannello a tutta larghezza e
+            # centrato in verticale; lo spazio sopra e sotto e' inevitabile.
+            ridotto = pannello.resize(
+                (lato, round(lato * pannello.height / pannello.width)),
+                Image.Resampling.LANCZOS,
+            )
+            icona = Image.new("RGBA", (lato, lato), (0, 0, 0, 0))
+            icona.alpha_composite(ridotto, (0, (lato - ridotto.height) // 2))
+            _salva(icona, f"{prefisso}icon{suffisso}.png")
+
+            # Logo: il pannello cosi' com'e', col lato corto a 256 o 512 px.
+            logo = pannello.resize(
+                (round(lato * pannello.width / pannello.height), lato),
+                Image.Resampling.LANCZOS,
+            )
+            _salva(logo, f"{prefisso}logo{suffisso}.png")
 
 
 if __name__ == "__main__":

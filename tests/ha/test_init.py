@@ -381,5 +381,8 @@ async def test_lintegrazione_porta_con_se_la_sua_icona(hass: HomeAssistant) -> N
 
     assert integrazione.has_branding
     cartella = Path(integrazione.file_path) / "brand"
-    for nome in ("icon.png", "icon@2x.png", "dark_icon.png", "dark_icon@2x.png"):
+    for nome in (
+        "icon.png", "icon@2x.png", "dark_icon.png", "dark_icon@2x.png",
+        "logo.png", "logo@2x.png", "dark_logo.png", "dark_logo@2x.png",
+    ):
         assert (cartella / nome).is_file(), nome
