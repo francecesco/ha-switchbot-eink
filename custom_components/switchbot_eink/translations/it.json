@@ -57,6 +57,11 @@
       "autenticazione": {
         "name": "Autenticazione"
       }
+    },
+    "button": {
+      "aggiorna_agenda": {
+        "name": "Aggiorna agenda"
+      }
     }
   },
   "services": {

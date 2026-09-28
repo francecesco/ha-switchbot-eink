@@ -1,4 +1,4 @@
-"""Base comune alle entità diagnostiche (`sensor.py`, `binary_sensor.py`)."""
+"""Base comune alle entità del pannello (`sensor.py`, `binary_sensor.py`, `button.py`)."""
 from __future__ import annotations
 
 from homeassistant.helpers.device_registry import DeviceInfo

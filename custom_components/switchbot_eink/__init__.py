@@ -30,7 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 # Le entita' diagnostiche di questo task: oltre a esporre stato, sono
 # ascoltatori veri del coordinator (vedi il commento sull'ascoltatore finto
 # piu' sotto).
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SENSOR]
 
 
 # L'integrazione si configura solo dall'interfaccia. Senza questo, da quando
