@@ -24,8 +24,9 @@ CONF_PAGE_SLOT: Final = "page_slot"
 CONF_UPDATE_INTERVAL: Final = "update_interval"
 CONF_CALENDARS: Final = "calendars"
 
-# Da allineare alla cadenza misurata sul dispositivo (Task 5).
-DEFAULT_UPDATE_INTERVAL: Final = 900  # secondi
+# Il pannello scarica da solo ogni tre ore, e per averla subito c'e' la
+# pressione lunga sul pulsante: un'agenda ripubblicata ogni cinque ore basta.
+DEFAULT_UPDATE_INTERVAL: Final = 5 * 60 * 60  # secondi
 MIN_PUBLISH_INTERVAL: Final = 60  # secondi, vincolo di spec
 
 SERVICE_REFRESH: Final = "refresh"

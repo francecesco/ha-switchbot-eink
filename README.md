@@ -27,14 +27,16 @@ sinistra, con data, ora e meteo, è disegnata dal firmware e resta com'è.
 
 ## Come funziona
 
-Ogni 15 minuti (intervallo configurabile) l'integrazione legge gli eventi dei prossimi
-tre giorni dai calendari scelti, compone la pagina e la pubblica, **solo se il
-contenuto è cambiato**.
+Ogni 5 ore (intervallo configurabile) l'integrazione legge gli eventi dei prossimi tre
+giorni dai calendari scelti, compone la pagina e la pubblica, **solo se il contenuto è
+cambiato**.
 
-Il pannello però **scarica il contenuto per conto suo, circa ogni tre ore**, e questa
-cadenza non si può cambiare. Pubblicare spesso serve a fargli trovare un'agenda fresca
-quando si sveglia. Per averla subito, **si tiene premuto il pulsante del pannello per due
-secondi**: il pannello riscarica immediatamente.
+Il pannello **scarica il contenuto per conto suo, circa ogni tre ore**, e questa cadenza
+non si può cambiare. Un evento aggiunto o spostato arriva quindi sul pannello con qualche
+ora di ritardo. Per averlo subito si chiama il servizio `switchbot_eink.refresh` e poi **si
+tiene premuto il pulsante del pannello per due secondi**: il pannello riscarica
+immediatamente. Chi vuole un'agenda più fresca senza intervenire può accorciare
+l'intervallo dalle opzioni.
 
 Per la stessa ragione in basso a destra c'è l'ora dell'ultimo aggiornamento (`agg.
 15:30`): con una lettura ogni tre ore, senza quella riga non si distingue un'agenda
@@ -88,7 +90,7 @@ Poi, da **Configura** sull'integrazione:
 | Opzione | Default | Note |
 |---|---|---|
 | Calendari da mostrare | nessuno | scelta multipla fra le entità `calendar.*` |
-| Secondi fra una pubblicazione e l'altra | 900 | minimo 60 |
+| Secondi fra una pubblicazione e l'altra | 18000 (5 ore) | minimo 60 |
 
 Finché non si sceglie almeno un calendario, il pannello mostra "Nessun evento nei
 prossimi 3 giorni".
