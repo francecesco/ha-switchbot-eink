@@ -291,12 +291,11 @@ distingue "la nostra scrittura non è arrivata" da "il dispositivo è lento".
 
 ## Cosa manca
 
-**Task 14 — confezionamento HACS e documentazione.** È l'ultimo, e l'unico rimasto. Serve
-`hacs.json`, il README con installazione e configurazione, e la verifica che l'integrazione
-si installi davvero come repository custom.
-
-Il modello di README nel piano è già scritto, ma va riletto: era stato pensato per la
-dashboard di stato e potrebbe avere altri residui oltre a `push_text`, che è già stato tolto.
+**Task 14 — confezionamento HACS e documentazione: fatto il 28 settembre.** `hacs.json`,
+`LICENSE` (MIT), il workflow CI e il README, riscritto da capo: quello del piano descriveva
+ancora la dashboard di stato, con card YAML, `examples/dashboard.yaml` e un'area da 800×372,
+tutte cose che non esistono più. Resta da verificare l'installazione vera da HACS, che
+richiede il repository pubblico su GitHub.
 
 **Poi la prova vera con i calendari veri.** Il layout è già stato visto sul pannello con
 gli eventi di prova della sonda (`agenda`), ed è stato sistemato: margine, niente data,
@@ -323,6 +322,15 @@ Da fare quando ci si arriva:
 globale e cambierebbe le cose anche negli altri progetti.
 
 **Ambiente.** `.venv` con Python 3.14.5, Home Assistant 2026.8.3, aiohttp 3.14.3, pytest 9.
+La suite è verificata anche su Home Assistant 2026.9.4, che è quello che scarica oggi
+un'installazione pulita.
+
+**Mai `pip install -e`.** Le dipendenze di sviluppo stanno in `[dependency-groups]` e si
+installano con `pip install --group dev`, senza installare il progetto. L'installazione
+editable mette in `sys.path` un path hook che il loader di Home Assistant scambia per una
+cartella: `FileNotFoundError` su `__editable__...__path_hook__` e 53 test di `tests/ha`
+falliti. Nel `.venv` locale il progetto non è mai stato installato, per questo non era
+emerso prima.
 
 **Mocking HTTP.** `AiohttpClientMocker` da `pytest_homeassistant_custom_component`. **Mai
 `aioresponses`**: è incompatibile con aiohttp 3.14.3, che Home Assistant impone.

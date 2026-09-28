@@ -9,8 +9,14 @@ description = "Home Assistant custom integration for the SwitchBot E-Ink Home Da
 requires-python = ">=3.13"
 dependencies = ["aiohttp>=3.9", "voluptuous>=0.13"]
 
-[project.optional-dependencies]
+# Un gruppo e non un extra: si installa con `pip install --group dev` senza
+# installare il progetto. L'installazione editable (`pip install -e`) mette in
+# sys.path un path hook che il loader di Home Assistant scambia per una
+# cartella, e fa fallire tutti i test in tests/ha.
+[dependency-groups]
 dev = [
+    "aiohttp>=3.9",
+    "voluptuous>=0.13",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-homeassistant-custom-component>=0.13",

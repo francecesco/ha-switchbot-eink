@@ -373,12 +373,16 @@ async def test_il_binary_sensor_di_autenticazione_e_a_posto(
 async def test_le_entita_diagnostiche_sono_collegate_al_device_del_pannello(
     hass: HomeAssistant, client_mock
 ) -> None:
-    await _setup(hass, client_mock)
+    entry = await _setup(hass, client_mock)
 
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
 
-    device = device_registry.async_get_device(identifiers={(DOMAIN, "DEV1")})
+    # `async_get_device` e' deprecato da Home Assistant 2026.9 e li' fa fallire
+    # il test: gli identificativi sono unici solo dentro una config entry.
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, "DEV1"), entry.entry_id
+    )
     assert device is not None
 
     for entity_id in (SENSOR_ID, BINARY_SENSOR_ID):
