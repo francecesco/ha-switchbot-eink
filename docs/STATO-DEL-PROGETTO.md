@@ -1,7 +1,7 @@
 # SwitchBot E-Ink — stato del progetto
 
 **Aggiornato al 28 settembre 2026.** Pubblicato su `github.com/francecesco/ha-switchbot-eink`
-(branch `master`), versione 0.2.0, 342 test verdi. Installato via HACS e in uso con i
+(branch `master`), versione 0.3.0, 347 test verdi. Installato via HACS e in uso con i
 calendari veri.
 
 Questo file serve a riprendere il lavoro dopo una pausa. I documenti di riferimento restano
@@ -222,9 +222,12 @@ cambiarla cambia l'impronta e ripubblica. Tabella `TESTI` in `layout/agenda.py`,
 italiano e inglese; ogni altra lingua ripiega sull'inglese. Il README è in inglese; commenti,
 test e documenti interni restano in italiano.
 
-**Icona.** Da Home Assistant 2026.8 un'integrazione custom serve le sue immagini dalla
-cartella `brand/` accanto al manifest, senza PR a `home-assistant/brands`. HACS nel suo
-elenco può mostrare ancora il segnaposto: per quello servirebbe la PR.
+**Icona e logo.** Dalla 2026.3 un'integrazione custom serve le sue immagini dalla cartella
+`brand/` accanto al manifest (il "Brands Proxy API"): la cartella `custom_integrations` del
+repository `home-assistant/brands` è dichiarata legacy, quindi nessuna PR lì. Le immagini
+rispettano le sue specifiche: icona quadrata 256/512 e logo col lato corto a 256/512, tutte
+ritagliate fino al soggetto, con le varianti `dark_`. Si rigenerano con
+`python -m tools.make_icon`.
 
 **Entità diagnostiche.** Un sensore con l'ora dell'ultima pubblicazione riuscita e un binary
 sensor con lo stato dell'autenticazione. Restano **sempre disponibili**, anche durante un
@@ -250,7 +253,7 @@ Layout rivisto il 28 settembre guardandolo sul pannello vero.
 │  C  08:30  Dentista                  │
 │  L  15:00  Consegna documenti        │
 │  MER 30   Ferie (tutto il giorno)    │
-│                          agg. 15:30  │
+│  C Casa · L Lavoro       agg. 15:30  │
 └──────────────────────────────────────┘
 ```
 
@@ -275,7 +278,8 @@ Regole che vale la pena ricordare:
   un evento intitolato con delle graffe verrebbe *eseguito*. Il campo di card `template:
   false` esiste per questo;
 - **con più calendari** ogni evento porta un marcatore di al massimo due caratteri, derivato
-  in modo deterministico dal nome.
+  in modo deterministico dal nome, e in basso a sinistra una legenda (`C Casa · L Lavoro`)
+  li spiega. La legenda entra nell'impronta: aggiungere un calendario ripubblica.
 
 `CHAR_WIDTH_RATIO = 0.52` stima quanti caratteri stanno in un rettangolo ed è
 **dichiaratamente approssimativa**: non abbiamo le metriche dei font del pannello. Vive in una
@@ -313,25 +317,16 @@ distingue "la nostra scrittura non è arrivata" da "il dispositivo è lento".
 
 ## Cosa manca
 
-**Task 14 — confezionamento HACS e documentazione: fatto il 28 settembre.** `hacs.json`,
-`LICENSE` (MIT), il workflow CI e il README, riscritto da capo: quello del piano descriveva
-ancora la dashboard di stato, con card YAML, `examples/dashboard.yaml` e un'area da 800×372,
-tutte cose che non esistono più. Resta da verificare l'installazione vera da HACS, che
-richiede il repository pubblico su GitHub.
+Niente di bloccante: l'integrazione è pubblicata (release `v0.3.0`), installata via HACS e
+in uso con i calendari veri.
 
-**Poi la prova vera con i calendari veri.** Il layout è già stato visto sul pannello con
-gli eventi di prova della sonda (`agenda`), ed è stato sistemato: margine, niente data,
-anteprima di domani. Manca la prova completa: installare l'integrazione, scegliere i
-calendari veri e guardare il risultato. È lì che si scopre se `CHAR_WIDTH_RATIO` tronca
-bene i titoli veri e se i marcatori si capiscono. Una legenda dei marcatori
-(`C Casa · L Lavoro`) è stata proposta ma non ancora decisa.
+Idee per dopo, nessuna decisa:
 
-Da fare quando ci si arriva:
-
-1. installare, configurare, scegliere i calendari;
-2. `switchbot_eink.refresh` da Strumenti per sviluppatori;
-3. pressione lunga di 2 secondi sul pulsante del pannello;
-4. guardare, e annotare cosa non va.
+- tarare `CHAR_WIDTH_RATIO` se i titoli veri risultano troncati troppo presto o troppo
+  tardi;
+- esplorare `button-configs/list` e `scheduled-tasks`: i pulsanti A–D del pannello e gli
+  aggiornamenti programmati potrebbero accorciare il ritardo di tre ore;
+- altre lingue per i testi del pannello, aggiungendo una voce a `TESTI`.
 
 ---
 
