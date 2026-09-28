@@ -191,17 +191,17 @@ token viene revocato parte il reauth flow.
 **Opzioni.** Quali calendari mostrare (scelta multipla fra le entità `calendar.*`) e ogni
 quanto ripubblicare. Cambiarle ricarica la entry.
 
-**Ciclo.** Ogni `update_interval` (default 18000 s, cioè 5 ore): legge gli eventi delle prossime 72 ore con
+**Ciclo.** Ogni `update_interval` (default 3600 s, cioè un'ora): legge gli eventi delle prossime 72 ore con
 `calendar.get_events`, genera la pagina, la compila, ne calcola l'impronta, e pubblica solo
 se è cambiata. Poi `update_template` seguito da `release`.
 
-**Perché 5 ore.** Fino al 28 settembre il default era 900 s, con questo ragionamento: il
-pannello legge ciò che trova sul server al risveglio, quindi pubblicare più spesso riduce
-l'età di ciò che troverà. L'utente ha scelto 5 ore: ogni quarto d'ora era troppo, per
-un'agenda che cambia lentamente e con la coppia `refresh` + pressione lunga disponibile
-quando serve subito. Il prezzo è che un evento nuovo può arrivare sul pannello con fino a
-circa otto ore di ritardo (cinque di pubblicazione più tre di lettura); l'ora `agg.` in
-basso lo rende visibile, e l'intervallo resta configurabile dalle opzioni.
+**Perché un'ora.** Il pannello legge ciò che trova sul server al risveglio, circa ogni tre
+ore: pubblicare più spesso della lettura riduce l'età di ciò che troverà. Fino al 28
+settembre il default era 900 s, che l'utente ha giudicato troppo frequente; 5 ore, provate
+subito dopo, lasciavano un evento nuovo fuori dal pannello fino a circa otto ore. Con
+un'ora il ritardo massimo è di circa quattro ore (una di pubblicazione più tre di lettura),
+e per averlo subito c'è la coppia `refresh` + pressione lunga. L'intervallo resta
+configurabile dalle opzioni.
 
 **Servizio.** `switchbot_eink.refresh` forza la pubblicazione ignorando l'impronta, ma
 rispetta comunque l'intervallo minimo di 60 secondi. È la coppia naturale della pressione

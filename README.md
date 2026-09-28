@@ -27,7 +27,7 @@ sinistra, con data, ora e meteo, è disegnata dal firmware e resta com'è.
 
 ## Come funziona
 
-Ogni 5 ore (intervallo configurabile) l'integrazione legge gli eventi dei prossimi tre
+Ogni ora (intervallo configurabile) l'integrazione legge gli eventi dei prossimi tre
 giorni dai calendari scelti, compone la pagina e la pubblica, **solo se il contenuto è
 cambiato**.
 
@@ -90,7 +90,7 @@ Poi, da **Configura** sull'integrazione:
 | Opzione | Default | Note |
 |---|---|---|
 | Calendari da mostrare | nessuno | scelta multipla fra le entità `calendar.*` |
-| Secondi fra una pubblicazione e l'altra | 18000 (5 ore) | minimo 60 |
+| Secondi fra una pubblicazione e l'altra | 3600 (un'ora) | minimo 60 |
 
 Finché non si sceglie almeno un calendario, il pannello mostra "Nessun evento nei
 prossimi 3 giorni".

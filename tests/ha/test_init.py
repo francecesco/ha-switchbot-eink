@@ -130,11 +130,12 @@ async def test_lagenda_viene_ripubblicata_a_ogni_intervallo(
     assert publish_mock.await_count >= 3
 
 
-async def test_senza_opzioni_si_ripubblica_ogni_cinque_ore(
+async def test_senza_opzioni_si_ripubblica_ogni_ora(
     hass: HomeAssistant, entry
 ) -> None:
-    """Il pannello scarica da solo ogni tre ore e l'agenda cambia lentamente:
-    ripubblicare ogni quarto d'ora era piu' traffico che utilita'."""
+    """Il pannello scarica da solo ogni tre ore: ogni quarto d'ora era piu'
+    traffico che utilita', cinque ore lasciavano l'agenda vecchia fra una
+    lettura e l'altra."""
     entry.add_to_hass(hass)
 
     with patch(PERCORSO_CLIENT) as client_cls:
@@ -143,7 +144,7 @@ async def test_senza_opzioni_si_ripubblica_ogni_cinque_ore(
             assert await hass.config_entries.async_setup(entry.entry_id)
             await hass.async_block_till_done()
 
-    assert entry.runtime_data.update_interval == timedelta(hours=5)
+    assert entry.runtime_data.update_interval == timedelta(hours=1)
 
 
 async def test_le_opzioni_cambiate_ricaricano_la_entry_con_il_nuovo_intervallo(
