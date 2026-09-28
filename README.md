@@ -21,7 +21,7 @@ by the firmware and stays as it is.
 │            │  H  08:30  Dentist                   │
 │            │  W  15:00  Hand in documents         │
 │            │  WED 30   Holiday (all day)          │
-│            │                       updated 15:30  │
+│            │  W Work · H Home      updated 15:30  │
 └────────────┴──────────────────────────────────────┘
 ```
 
@@ -48,7 +48,8 @@ read every three hours, without it you could not tell a fresh agenda from this m
 - **The day after**: a one-line summary.
 - **Several calendars**: the panel only has black and grey, so calendars cannot be told
   apart by colour. Each event carries a one- or two-letter marker taken from the calendar
-  name (`W` for Work, `H` for Home). With a single calendar, no markers are shown.
+  name (`W` for Work, `H` for Home), and a legend in the bottom left corner explains
+  them. With a single calendar, neither markers nor legend are shown.
 - **Language**: the panel text follows the Home Assistant language. Italian and English
   are available; any other language falls back to English.
 

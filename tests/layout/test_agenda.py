@@ -580,3 +580,54 @@ def test_la_variante_regionale_conta_come_la_sua_lingua() -> None:
     """Home Assistant usa codici come "en-GB" e "pt-BR"."""
     assert _pagina_completa("en-GB") == _pagina_completa("en")
     assert _pagina_completa("it-IT") == _pagina_completa("it")
+
+
+# ---- legenda dei marcatori -------------------------------------------------
+
+
+def test_con_piu_calendari_la_legenda_spiega_i_marcatori() -> None:
+    page = build_agenda_page(
+        [evento(20, "Riunione", "Lavoro")], ADESSO, calendars=["Lavoro", "Famiglia"]
+    )
+
+    assert "L Lavoro · F Famiglia" in testi_di(page)
+
+
+def test_con_un_solo_calendario_non_serve_la_legenda() -> None:
+    page = build_agenda_page([evento(20, "Riunione")], ADESSO, calendars=["Personale"])
+
+    assert not any("Personale" in t for t in testi_di(page))
+
+
+def test_la_legenda_sta_in_basso_a_sinistra_accanto_allora() -> None:
+    page = build_agenda_page(
+        [evento(20, "Riunione", "Lavoro")], ADESSO, calendars=["Lavoro", "Famiglia"]
+    )
+    testuali = [c for c in page["cards"] if c["type"] == "text"]
+    legenda = next(c for c in testuali if c["text"].startswith("L Lavoro"))
+    ora = next(c for c in testuali if c["text"].startswith("agg. "))
+
+    assert legenda["position"][0] == MARGINE_SINISTRO
+    assert legenda["position"][1] == ora["position"][1]
+    assert legenda["position"][0] + legenda["position"][2] <= ora["position"][0]
+
+
+def test_la_legenda_resta_anche_senza_lora_di_aggiornamento() -> None:
+    """Non cambia col tempo: deve stare anche nella pagina del confronto,
+    altrimenti aggiungere un calendario non ripubblicherebbe."""
+    page = build_agenda_page(
+        [evento(20, "Riunione", "Lavoro")],
+        ADESSO,
+        calendars=["Lavoro", "Famiglia"],
+        stamp=False,
+    )
+
+    assert "L Lavoro · F Famiglia" in testi_di(page)
+
+
+def test_una_legenda_lunga_viene_troncata() -> None:
+    nomi = [f"Calendario condiviso numero {i}" for i in range(6)]
+    page = build_agenda_page([evento(20, "Riunione", nomi[0])], ADESSO, calendars=nomi)
+    legenda = next(t for t in testi_di(page) if "Calendario condiviso numero 0" in t)
+
+    assert legenda.endswith("…")

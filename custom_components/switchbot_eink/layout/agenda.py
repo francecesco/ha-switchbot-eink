@@ -106,6 +106,10 @@ _ALTEZZA_RIGA_DOMANI = 30
 _Y_PRIMO_GIORNO = 298
 _ALTEZZA_RIGA_GIORNO = 30
 _Y_AGGIORNAMENTO = 352
+# La legenda dei marcatori divide l'ultima riga con l'ora di aggiornamento:
+# a sinistra fino a poco prima della sua card, che comincia a x=360.
+_X_ORA_AGGIORNAMENTO = 360
+_LARGHEZZA_LEGENDA = _X_ORA_AGGIORNAMENTO - 8 - MARGINE_SINISTRO
 
 _CORPO_EVENTO = 22
 _CORPO_EVENTO_DOMANI = 18
@@ -318,17 +322,35 @@ def build_agenda_page(
                 )
             )
 
+    if marcatori:
+        # Non dipende dall'ora: sta anche nella pagina del confronto, cosi'
+        # aggiungere o rinominare un calendario ripubblica.
+        cards.append(
+            _card(
+                truncate(_legenda(marcatori), _LARGHEZZA_LEGENDA, _CORPO_AGGIORNAMENTO),
+                (_X, _Y_AGGIORNAMENTO, _LARGHEZZA_LEGENDA, 22),
+                _CORPO_AGGIORNAMENTO,
+            )
+        )
+
     if stamp:
         cards.append(
             _card(
                 t.aggiornato.format(ora=now.strftime("%H:%M")),
-                (360, _Y_AGGIORNAMENTO, 200, 22),
+                (_X_ORA_AGGIORNAMENTO, _Y_AGGIORNAMENTO, 200, 22),
                 _CORPO_AGGIORNAMENTO,
                 "right",
             )
         )
 
     return {"page": page_slot, "name": name, "cards": cards}
+
+
+def _legenda(marcatori: dict[str, str]) -> str:
+    """"L Lavoro · F Famiglia", nell'ordine in cui l'utente ha scelto i calendari."""
+    return " · ".join(
+        f"{marcatore} {nome.strip()}" for nome, marcatore in marcatori.items()
+    )
 
 
 def _righe_di_oggi(

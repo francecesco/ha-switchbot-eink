@@ -194,6 +194,7 @@ def test_lagenda_di_prova_mostra_gli_eventi_di_oggi() -> None:
     assert "+3 altri" in testi
     assert "DOMANI" in testi
     assert "Dentista" in testi
+    assert "C Casa · L Lavoro" in testi
 
 
 def test_gli_eventi_di_prova_coprono_i_tre_giorni_e_due_calendari() -> None:
