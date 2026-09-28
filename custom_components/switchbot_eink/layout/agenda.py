@@ -15,34 +15,13 @@ from .const import USABLE_WIDTH
 
 # Il pannello e' configurato in italiano — lo dichiara la risposta di `preview` —
 # quindi i nomi stanno qui. Estrarli in un catalogo di lingue e' un problema per
-# quando servira' la seconda lingua.
-GIORNI: tuple[str, ...] = (
-    "lunedi",
-    "martedi",
-    "mercoledi",
-    "giovedi",
-    "venerdi",
-    "sabato",
-    "domenica",
-)
+# quando servira' la seconda lingua. La data di oggi non compare: la barra
+# laterale del firmware la mostra gia'.
 GIORNI_BREVI: tuple[str, ...] = ("LUN", "MAR", "MER", "GIO", "VEN", "SAB", "DOM")
-MESI: tuple[str, ...] = (
-    "gennaio",
-    "febbraio",
-    "marzo",
-    "aprile",
-    "maggio",
-    "giugno",
-    "luglio",
-    "agosto",
-    "settembre",
-    "ottobre",
-    "novembre",
-    "dicembre",
-)
 
 FINESTRA_GIORNI = 3
-MAX_EVENTI_OGGI = 6
+MAX_EVENTI_OGGI = 5
+MAX_EVENTI_DOMANI = 2
 
 # Larghezza media di un carattere come frazione del corpo. E' una stima: i font
 # del pannello non hanno spaziatura fissa e non ne abbiamo le metriche. Vive in
@@ -50,18 +29,30 @@ MAX_EVENTI_OGGI = 6
 CHAR_WIDTH_RATIO = 0.52
 
 # Geometria, in coordinate dell'area utile (560 x 380).
-_Y_INTESTAZIONE = 0
-_Y_FILETTO_ALTO = 34
-_Y_PRIMA_RIGA = 44
+
+# Aria fra la barra laterale del firmware e il contenuto: a x=0 i marcatori
+# dei calendari finivano attaccati alla barra. Tutto cio' che comincia a
+# sinistra parte da qui, e si ferma comunque al bordo destro dell'area.
+MARGINE_SINISTRO = 16
+_X = MARGINE_SINISTRO
+_LARGHEZZA = USABLE_WIDTH - MARGINE_SINISTRO
+
+# Oggi: fino a cinque righe dal bordo alto, poi il riepilogo "+N altri".
+_Y_PRIMA_RIGA = 0
 _ALTEZZA_RIGA = 34
-_Y_RIEPILOGO = 248
-_Y_FILETTO_BASSO = 278
-_Y_PRIMO_GIORNO = 288
+_Y_RIEPILOGO = 170
+_Y_FILETTO = 200
+# Domani: un'etichetta (con il suo "+N altri" a destra) e una lista breve.
+_Y_DOMANI = 208
+_Y_PRIMA_RIGA_DOMANI = 234
+_ALTEZZA_RIGA_DOMANI = 30
+# Dopodomani, e oltre se la finestra si allarga: una riga riassuntiva ciascuno.
+_Y_PRIMO_GIORNO = 298
 _ALTEZZA_RIGA_GIORNO = 30
 _Y_AGGIORNAMENTO = 352
 
-_CORPO_INTESTAZIONE = 24
 _CORPO_EVENTO = 22
+_CORPO_EVENTO_DOMANI = 18
 _CORPO_MARCATORE = 14
 _CORPO_GIORNO = 16
 _CORPO_AGGIORNAMENTO = 13
@@ -143,11 +134,7 @@ def _card(
 
 
 def _filetto(y: int) -> dict[str, Any]:
-    return {"type": "divider", "position": [0, y, USABLE_WIDTH, 2]}
-
-
-def _intestazione(giorno: date) -> str:
-    return f"OGGI · {GIORNI[giorno.weekday()]} {giorno.day} {MESI[giorno.month - 1]}"
+    return {"type": "divider", "position": [_X, y, _LARGHEZZA, 2]}
 
 
 def _copre(evento: Event, giorno: date) -> bool:
@@ -202,15 +189,15 @@ def _per_giorno(
     return raggruppati
 
 
-def _titolo_riga_oggi(evento: Event, oggi: date) -> tuple[str, str]:
-    """(ora, titolo) per la riga di un evento nella lista di oggi.
+def _titolo_riga(evento: Event, giorno: date) -> tuple[str, str]:
+    """(ora, titolo) per la riga di un evento nella lista di un giorno.
 
-    Un evento in corso non ha un'ora d'inizio sensata da mostrare oggi: viene
-    da un giorno precedente.
+    Un evento in corso non ha un'ora d'inizio sensata da mostrare quel giorno:
+    viene da un giorno precedente.
     """
     if evento.all_day:
         return "", f"Tutto il giorno · {evento.summary}"
-    if evento.start.date() < oggi:
+    if evento.start.date() < giorno:
         return "", f"In corso · {evento.summary}"
     return evento.start.strftime("%H:%M"), evento.summary
 
@@ -241,34 +228,31 @@ def build_agenda_page(
     )
     marcatori = calendar_markers(nomi) if len(nomi) > 1 else {}
 
-    cards: list[dict[str, Any]] = [
-        _card(_intestazione(oggi), (0, _Y_INTESTAZIONE, USABLE_WIDTH, 32),
-              _CORPO_INTESTAZIONE),
-        _filetto(_Y_FILETTO_ALTO),
-    ]
+    cards: list[dict[str, Any]] = []
 
     if not any(raggruppati.values()):
         cards.append(
             _card(
                 f"Nessun evento nei prossimi {FINESTRA_GIORNI} giorni",
-                (0, 140, USABLE_WIDTH, 32),
+                (_X, 140, _LARGHEZZA, 32),
                 _CORPO_EVENTO,
                 "center",
             )
         )
     else:
         cards.extend(_righe_di_oggi(raggruppati[oggi], marcatori, now, oggi))
-        cards.append(_filetto(_Y_FILETTO_BASSO))
-        for indice, giorno in enumerate(giorni[1:]):
+        cards.append(_filetto(_Y_FILETTO))
+        cards.extend(_righe_di_domani(raggruppati[giorni[1]], marcatori, giorni[1]))
+        for indice, giorno in enumerate(giorni[2:]):
             cards.append(
                 _card(
                     truncate(
                         _riga_giorno(giorno, raggruppati[giorno]),
-                        USABLE_WIDTH,
+                        _LARGHEZZA,
                         _CORPO_GIORNO,
                     ),
-                    (0, _Y_PRIMO_GIORNO + indice * _ALTEZZA_RIGA_GIORNO,
-                     USABLE_WIDTH, 28),
+                    (_X, _Y_PRIMO_GIORNO + indice * _ALTEZZA_RIGA_GIORNO,
+                     _LARGHEZZA, 28),
                     _CORPO_GIORNO,
                 )
             )
@@ -296,7 +280,7 @@ def _righe_di_oggi(
         return [
             _card(
                 "Nessun evento oggi",
-                (0, _Y_PRIMA_RIGA, USABLE_WIDTH, 30),
+                (_X, _Y_PRIMA_RIGA, _LARGHEZZA, 30),
                 _CORPO_EVENTO,
                 "center",
             )
@@ -310,23 +294,79 @@ def _righe_di_oggi(
         return [
             _card(
                 "Nessun altro evento oggi",
-                (0, _Y_PRIMA_RIGA, USABLE_WIDTH, 30),
+                (_X, _Y_PRIMA_RIGA, _LARGHEZZA, 30),
                 _CORPO_EVENTO,
                 "center",
             )
         ]
 
-    visibili = list(attivi[:MAX_EVENTI_OGGI])
+    righe, nascosti = _righe_eventi(
+        attivi, marcatori, oggi, _Y_PRIMA_RIGA, _ALTEZZA_RIGA, _CORPO_EVENTO,
+        MAX_EVENTI_OGGI,
+    )
+    if nascosti:
+        righe.append(_altri(nascosti, _Y_RIEPILOGO))
+    return righe
+
+
+def _righe_di_domani(
+    eventi: Sequence[Event], marcatori: dict[str, str], domani: date
+) -> list[dict[str, Any]]:
+    """Un'anteprima di domani: etichetta e i primi eventi, in corpo minore.
+
+    Nessun filtro sugli eventi conclusi: domani non e' ancora cominciato, e
+    un evento alle 9 viene prima dell'ora di adesso solo come ora del giorno.
+    """
+    cards = [_card("DOMANI", (_X, _Y_DOMANI, 200, 24), _CORPO_GIORNO)]
+    if not eventi:
+        cards.append(
+            _card(
+                "Nessun evento",
+                (_X, _Y_PRIMA_RIGA_DOMANI, _LARGHEZZA, 28),
+                _CORPO_EVENTO_DOMANI,
+            )
+        )
+        return cards
+
+    righe, nascosti = _righe_eventi(
+        eventi, marcatori, domani, _Y_PRIMA_RIGA_DOMANI, _ALTEZZA_RIGA_DOMANI,
+        _CORPO_EVENTO_DOMANI, MAX_EVENTI_DOMANI,
+    )
+    cards.extend(righe)
+    if nascosti:
+        # Sulla riga dell'etichetta: una riga in piu' qui non c'e'.
+        cards.append(_altri(nascosti, _Y_DOMANI))
+    return cards
+
+
+def _altri(nascosti: int, y: int) -> dict[str, Any]:
+    """Far sparire eventi in silenzio e' peggio che dire quanti ne mancano."""
+    return _card(f"+{nascosti} altri", (360, y, 200, 24), _CORPO_GIORNO, "right")
+
+
+def _righe_eventi(
+    eventi: Sequence[Event],
+    marcatori: dict[str, str],
+    giorno: date,
+    y_iniziale: int,
+    altezza_riga: int,
+    corpo: int,
+    massimo: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Le righe marcatore/ora/titolo dei primi `massimo` eventi, e quanti ne
+    restano fuori."""
+    visibili = list(eventi[:massimo])
     cards: list[dict[str, Any]] = []
 
     if marcatori:
-        x_ora, x_titolo = _LARGHEZZA_MARCATORE + 4, _X_TITOLO_CON_MARCATORI
+        x_ora, x_titolo = _X + _LARGHEZZA_MARCATORE + 4, _X + _X_TITOLO_CON_MARCATORI
     else:
-        x_ora, x_titolo = 0, 80
+        x_ora, x_titolo = _X, _X + 80
     larghezza_titolo = USABLE_WIDTH - x_titolo
+    altezza = altezza_riga - 4
 
     for indice, evento in enumerate(visibili):
-        y = _Y_PRIMA_RIGA + indice * _ALTEZZA_RIGA
+        y = y_iniziale + indice * altezza_riga
 
         if marcatori:
             cards.append(
@@ -334,36 +374,25 @@ def _righe_di_oggi(
                     # Un calendario non elencato non deve prendere un
                     # marcatore vuoto in silenzio: "?" e' visibile.
                     marcatori.get(evento.calendar, "?"),
-                    (0, y, _LARGHEZZA_MARCATORE, 30),
+                    (_X, y, _LARGHEZZA_MARCATORE, altezza),
                     _CORPO_MARCATORE,
                 )
             )
 
-        ora, titolo = _titolo_riga_oggi(evento, oggi)
+        ora, titolo = _titolo_riga(evento, giorno)
 
         # Un evento di tutto il giorno, o gia' in corso, non ha un'ora da
         # mostrare: niente card vuota nella colonna dell'ora.
         if ora:
             cards.append(
-                _card(ora, (x_ora, y, _LARGHEZZA_ORA, 30), _CORPO_EVENTO, "right")
+                _card(ora, (x_ora, y, _LARGHEZZA_ORA, altezza), corpo, "right")
             )
         cards.append(
             _card(
-                truncate(titolo, larghezza_titolo, _CORPO_EVENTO),
-                (x_titolo, y, larghezza_titolo, 30),
-                _CORPO_EVENTO,
+                truncate(titolo, larghezza_titolo, corpo),
+                (x_titolo, y, larghezza_titolo, altezza),
+                corpo,
             )
         )
 
-    nascosti = len(attivi) - len(visibili)
-    if nascosti:
-        cards.append(
-            _card(
-                f"+{nascosti} altri",
-                (360, _Y_RIEPILOGO, 200, 24),
-                _CORPO_GIORNO,
-                "right",
-            )
-        )
-
-    return cards
+    return cards, len(eventi) - len(visibili)

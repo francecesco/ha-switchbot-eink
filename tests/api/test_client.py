@@ -217,6 +217,46 @@ async def test_release_invia_solo_il_device_id(aioclient, client) -> None:
     assert body == {"deviceID": "A"}
 
 
+async def test_la_configurazione_della_home_si_legge_per_dispositivo(aioclient, client) -> None:
+    """Dice se il pannello mostra la home web (un nostro template) o quella
+    nativa dell'app: dopo un ripristino di fabbrica torna su quella nativa."""
+    aioclient.post(
+        f"{BASE}/web/v1/user/button-configs/homepage-info",
+        json={"resultCode": 100, "data": {"pageSource": "app", "appHomeType": 1}},
+    )
+
+    config = await client.get_home_page_config("A")
+    _method, _url, body, _headers = aioclient.mock_calls[0]
+
+    assert body == {"deviceID": "A"}
+    assert config == {"pageSource": "app", "appHomeType": 1}
+
+
+async def test_la_home_web_si_imposta_col_template_scelto(aioclient, client) -> None:
+    aioclient.post(
+        f"{BASE}/web/v1/user/button-configs/homepage-save",
+        json={"resultCode": 100, "data": None},
+    )
+
+    await client.set_home_page_web("A", 1105)
+    _method, _url, body, _headers = aioclient.mock_calls[0]
+
+    assert body == {"deviceID": "A", "pageSource": "web", "templateID": 1105}
+
+
+async def test_le_pagine_del_page_manager_si_elencano_per_dispositivo(aioclient, client) -> None:
+    aioclient.post(
+        f"{BASE}/web/v1/user/page-manager/list",
+        json={"resultCode": 100, "data": {"list": [{"id": 7, "pageSource": 2}]}},
+    )
+
+    pagine = await client.list_pages("A")
+    _method, _url, body, _headers = aioclient.mock_calls[0]
+
+    assert body == {"deviceID": "A"}
+    assert pagine == [{"id": 7, "pageSource": 2}]
+
+
 async def test_header_authorization_senza_bearer_in_eu(aioclient, client) -> None:
     aioclient.post(f"{BASE}/web/v1/user/templates/release", json={"resultCode": 100, "data": None})
 

@@ -1,6 +1,6 @@
 # SwitchBot E-Ink — stato del progetto
 
-**Aggiornato al 25 agosto 2026.** Branch `feat/switchbot-eink`, 55 commit, 302 test verdi.
+**Aggiornato al 28 settembre 2026.** Branch `feat/switchbot-eink`, 57 commit, 325 test verdi.
 
 Questo file serve a riprendere il lavoro dopo una pausa. I documenti di riferimento restano
 la spec (`docs/superpowers/specs/2026-08-22-switchbot-eink-ha-design.md`) e il piano
@@ -101,14 +101,44 @@ sugli slot occupati si aggiorna, non si crea.
 - `lastPage: false` con `nextPageName` vuoto anche avendo una sola pagina: mai spiegato,
   nessun effetto osservato.
 
+### Il ripristino di fabbrica e il firmware (28 settembre)
+
+Dopo un ripristino alle impostazioni di fabbrica il pannello mostrava la **home meteo
+nativa** e ignorava il nostro template, anche se sul server tutto era a posto: template
+`1105` con l'agenda, `preview` corretto, home configurata su `web`. Non è cambiato niente
+finché dall'app SwitchBot non è stato installato **l'aggiornamento del firmware** che era
+in sospeso: da lì in poi l'agenda è comparsa.
+
+Quindi, se il pannello torna al meteo, **prima di toccare il codice** si controllano in
+quest'ordine: `preview` (il server ha il contenuto?), `homepage` (la home è `web` sul
+template giusto?), e l'app (c'è un aggiornamento firmware?).
+
+Nel frattempo l'editor web è cambiato, e ci sono rotte nuove sotto `/productbiz`:
+
+| Rotta | Cosa fa |
+|---|---|
+| `button-configs/homepage-info` | da dove il pannello prende la home: `pageSource` `web` (+ `templateID`) o `app` (+ `appHomeType`, 1 standard, 2 minimale) |
+| `button-configs/homepage-save` | la imposta; per `web` l'editor manda solo `pageSource` e `templateID`, e il backend azzera `appHomeType` |
+| `page-manager/list` | il modello di pagine nuovo (web = `pageSource` 1, app = 2); sul nostro pannello è vuoto |
+| `button-configs/list`, `scheduled-tasks` | pagine per i pulsanti A–D e aggiornamenti programmati: non ancora esplorati |
+
+L'editor sotto la versione di firmware V2.2 (`wifiVersion < 22`) disattiva parte delle
+funzioni. È coerente con quello che abbiamo visto, ma che fosse proprio questa la soglia
+non l'abbiamo misurato.
+
+"Publish to Home" nell'editor nuovo chiama lo stesso `templates/release` che usiamo noi: il
+percorso di scrittura resta valido.
+
 ---
 
 ## Stato del dispositivo dell'utente
 
-Pannello `AABBCCDDEEFF`, regione `eu`, lingua `it`, città MiaCittà.
+Pannello `AABBCCDDEEFF`, regione `eu`, lingua `it`, città MiaCittà. Ripristinato alle
+impostazioni di fabbrica e aggiornato di firmware il 28 settembre.
 
 Tutte le pagine custom sono state **cancellate**: resta il solo template `1105` sulla home,
-che è quello su cui pubblichiamo. La home non si cancella mai, si sovrascrive — cosa faccia
+che è quello su cui pubblichiamo. La home è configurata come `web` su `1105`; sul pannello
+c'è l'agenda con gli eventi di prova della sonda. La home non si cancella mai, si sovrascrive — cosa faccia
 il firmware senza un template home non è noto.
 
 ---
@@ -182,27 +212,36 @@ guasto: è esattamente il momento in cui servono.
 
 ## L'agenda
 
-Finestra di tre giorni: oggi in evidenza, i due successivi in sintesi.
+Finestra di tre giorni: oggi in evidenza, domani in anteprima, dopodomani in sintesi.
+Layout rivisto il 28 settembre guardandolo sul pannello vero.
 
 ```
 ┌──────────────────────────────────────┐
-│ OGGI · domenica 23 agosto            │
-│                                      │
-│    09:00   Riunione settimanale      │
-│    13:30   Pranzo con Marco          │
-│    18:00   Palestra                  │
-│                              +2 altri│
+│  C  14:30  Evento in corso           │
+│  L  16:30  Riunione settimanale      │
+│  C  17:30  Pranzo con Marco          │
+│  L  18:30  Revisione del progetto…   │
+│  C  19:30  Spesa                     │
+│                             +3 altri │
 ├──────────────────────────────────────┤
-│ LUN 24   08:30 Dentista · 15:00 Con… │
-│ MAR 25   Ferie (tutto il giorno)     │
-│                          agg. 17:24  │
+│  DOMANI                              │
+│  C  08:30  Dentista                  │
+│  L  15:00  Consegna documenti        │
+│  MER 30   Ferie (tutto il giorno)    │
+│                          agg. 15:30  │
 └──────────────────────────────────────┘
 ```
 
 Regole che vale la pena ricordare:
 
-- **massimo sei eventi oggi**, poi la riga `+N altri`: far sparire eventi in silenzio è
+- **nessuna intestazione con la data**: la barra laterale del firmware la mostra già, e
+  ripeterla rubava una riga agli eventi;
+- **un margine sinistro di 16 px** (`MARGINE_SINISTRO`): a `x=0` i marcatori finivano
+  attaccati alla barra laterale;
+- **massimo cinque eventi oggi**, poi la riga `+N altri`: far sparire eventi in silenzio è
   peggio che dire quanti ne mancano;
+- **domani ne mostra due**, in corpo minore, col suo `+N altri` sulla riga "DOMANI"; senza
+  il filtro sugli eventi conclusi, che vale solo per oggi;
 - **gli eventi già conclusi non occupano le righe di oggi**, altrimenti sei impegni finiti in
   mattinata nasconderebbero la cena;
 - **gli eventi già in corso compaiono lo stesso** (una settimana di ferie cominciata lunedì
@@ -235,7 +274,14 @@ credenziali da `SWITCHBOT_USER`, `SWITCHBOT_PASS`, `SWITCHBOT_REGION` e non le s
 .venv/bin/python -m tools.probe ruler       # righello numerato sulle due assi
 .venv/bin/python -m tools.probe frame       # quattro angoli del rettangolo da verificare
 .venv/bin/python -m tools.probe wipe        # elenca le custom da cancellare (--yes per farlo)
+.venv/bin/python -m tools.probe agenda      # pubblica l'agenda vera, con eventi di prova
+.venv/bin/python -m tools.probe homepage    # legge la configurazione della home (--yes per metterla su web)
 ```
+
+`agenda` passa dagli stessi `build_agenda_page` → `validate_page` → `compile_page` del
+coordinator, con eventi ancorati all'ora corrente: serve a vedere il layout sul pannello
+senza Home Assistant. `homepage --force --yes` risalva la configurazione anche quando è già
+quella giusta.
 
 `--slot` vale `home` di default. `wipe` non tocca mai la home, e senza `--yes` fa una prova a
 vuoto. `preview` è la prima cosa da lanciare quando qualcosa non compare sullo schermo:
@@ -252,10 +298,12 @@ si installi davvero come repository custom.
 Il modello di README nel piano è già scritto, ma va riletto: era stato pensato per la
 dashboard di stato e potrebbe avere altri residui oltre a `push_text`, che è già stato tolto.
 
-**Poi la prova vera**, che è la cosa più importante che resta e che nessun test può fare:
-installare l'integrazione, scegliere i calendari veri, e **guardare l'agenda sul pannello**.
-È lì che si scopre se `CHAR_WIDTH_RATIO` è tarato bene, se sei righe di eventi ci stanno, e
-se i corpi dei caratteri sono leggibili su quattro grigi a distanza di lettura.
+**Poi la prova vera con i calendari veri.** Il layout è già stato visto sul pannello con
+gli eventi di prova della sonda (`agenda`), ed è stato sistemato: margine, niente data,
+anteprima di domani. Manca la prova completa: installare l'integrazione, scegliere i
+calendari veri e guardare il risultato. È lì che si scopre se `CHAR_WIDTH_RATIO` tronca
+bene i titoli veri e se i marcatori si capiscono. Una legenda dei marcatori
+(`C Casa · L Lavoro`) è stata proposta ma non ancora decisa.
 
 Da fare quando ci si arriva:
 

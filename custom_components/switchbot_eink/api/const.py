@@ -45,3 +45,13 @@ PATH_TPL_UPDATE: Final = "/web/v1/user/templates/update"
 PATH_TPL_DEL: Final = "/web/v1/user/templates/del"
 PATH_TPL_RELEASE: Final = "/web/v1/user/templates/release"
 PATH_TPL_PREVIEW: Final = "/web/v1/user/templates/preview"
+
+# Quale pagina il pannello mostra come home: `pageSource` "web" (un template
+# nostro, `templateID`) oppure "app" (la home meteo nativa, `appHomeType`).
+# Un ripristino di fabbrica la riporta su "app", e a quel punto il pannello
+# ignora il template home anche se e' aggiornato.
+PATH_HOMEPAGE_INFO: Final = "/web/v1/user/button-configs/homepage-info"
+PATH_HOMEPAGE_SAVE: Final = "/web/v1/user/button-configs/homepage-save"
+# Il modello di pagine piu' recente dell'editor web: pagine create da web
+# (`pageSource` 1) e dall'app (2), insieme.
+PATH_PAGES_LIST: Final = "/web/v1/user/page-manager/list"

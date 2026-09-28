@@ -13,6 +13,8 @@ Uso:
     python -m tools.probe clock --slot custom1
     python -m tools.probe origin --slot custom1
     python -m tools.probe metric --slot custom1
+    python -m tools.probe agenda
+    python -m tools.probe homepage [--yes]
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Any
 
 import aiohttp
@@ -33,6 +35,9 @@ from custom_components.switchbot_eink.api.client import SwitchBotCanvasClient  #
 from custom_components.switchbot_eink.api.envelope import normalize_region  # noqa: E402
 from custom_components.switchbot_eink.api.errors import SwitchBotCanvasError  # noqa: E402
 from custom_components.switchbot_eink.api.models import Template, TemplateSummary  # noqa: E402
+from custom_components.switchbot_eink.layout.agenda import Event, build_agenda_page  # noqa: E402
+from custom_components.switchbot_eink.layout.compile import compile_page  # noqa: E402
+from custom_components.switchbot_eink.layout.schema import validate_page  # noqa: E402
 
 
 def _wire(
@@ -265,6 +270,50 @@ def build_metric_components() -> list[dict[str, str]]:
     ]
 
 
+def sample_agenda_events(now: datetime) -> list[Event]:
+    """Eventi finti per vedere l'agenda sul pannello senza Home Assistant.
+
+    Quelli di oggi sono ancorati a scarti dall'istante, mai a orari scritti a
+    mano: a tarda sera finiscono su domani, ma la pagina resta valida. Coprono
+    i casi che il layout tratta a parte: un evento in corso, uno tutto il
+    giorno, due calendari, e piu' eventi di quanti ne stanno oggi, per far
+    comparire "+N".
+    """
+    oggi = datetime.combine(now.date(), time.min)
+    domani = oggi + timedelta(days=1)
+    dopodomani = oggi + timedelta(days=2)
+    ora = now.replace(second=0, microsecond=0)
+
+    def ev(inizio: datetime, durata: timedelta, titolo: str, calendario: str,
+           tutto_il_giorno: bool = False) -> Event:
+        return Event(inizio, inizio + durata, titolo, tutto_il_giorno, calendario)
+
+    ore = timedelta(hours=1)
+    return [
+        ev(ora - ore, 2 * ore, "Evento in corso", "Casa"),
+        ev(ora + ore, ore, "Riunione settimanale", "Lavoro"),
+        ev(ora + 2 * ore, ore, "Pranzo con Marco", "Casa"),
+        ev(ora + 3 * ore, ore, "Revisione del progetto e-ink", "Lavoro"),
+        ev(ora + 4 * ore, ore, "Spesa", "Casa"),
+        ev(ora + 5 * ore, ore, "Chiamata con il fornitore", "Lavoro"),
+        ev(ora + 6 * ore, ore, "Palestra", "Casa"),
+        ev(ora + 7 * ore, ore, "Cena", "Casa"),
+        ev(domani + 8.5 * ore, ore, "Dentista", "Casa"),
+        ev(domani + 15 * ore, ore, "Consegna documenti", "Lavoro"),
+        ev(dopodomani, timedelta(days=1), "Ferie", "Casa", tutto_il_giorno=True),
+    ]
+
+
+def build_agenda_components(now: datetime) -> list[dict[str, str]]:
+    """Lo stesso percorso del coordinator: genera, valida, compila.
+
+    Le card dell'agenda hanno `template: false` e nessuna entita', quindi
+    renderer e resolver non vengono mai interpellati sul serio.
+    """
+    pagina = validate_page(build_agenda_page(sample_agenda_events(now), now))
+    return compile_page(pagina, lambda testo: testo, lambda _entita: None)
+
+
 def read_credentials() -> tuple[str, str, str]:
     """Legge le credenziali dall'ambiente, spiegando cosa manca invece di esplodere."""
     mancanti = [
@@ -339,6 +388,52 @@ async def _wipe(client: SwitchBotCanvasClient, device_id: str, conferma: bool) -
     print("Fatto. Sul pannello resta solo la home.")
 
 
+async def _homepage(
+    client: SwitchBotCanvasClient, device_id: str, conferma: bool, forza: bool
+) -> None:
+    """Mostra da dove il pannello prende la home e, con conferma, la porta sul web.
+
+    Se `pageSource` e' "app" il pannello mostra la home meteo nativa e ignora
+    il nostro template home, per quanto sia aggiornato: e' lo stato in cui lo
+    lascia un ripristino di fabbrica.
+
+    `forza` rifa' il salvataggio anche con i valori gia' giusti: il pannello
+    tiene una copia locale della configurazione, e un ripristino puo' averla
+    azzerata mentre il cloud dice ancora "web".
+    """
+    config = await client.get_home_page_config(device_id)
+    print(f"Configurazione attuale della home: {json.dumps(config, ensure_ascii=False)}")
+
+    print("Pagine nel page manager:")
+    for pagina in await client.list_pages(device_id):
+        print(f"  {json.dumps(pagina, ensure_ascii=False)[:300]}")
+
+    home = [s for s in await client.list_templates(device_id) if s.page_slot == "home"]
+    if not home:
+        raise SystemExit("Nessun template sullo slot home: pubblicane uno prima (es. `agenda`).")
+    template_id = home[0].template_id
+
+    if (
+        not forza
+        and config.get("pageSource") == "web"
+        and config.get("templateID") == template_id
+    ):
+        print(f"La home e' gia' il template web {template_id}: niente da cambiare.")
+        print("Con --force --yes si rifa' comunque il salvataggio.")
+        return
+
+    print(f"Da impostare: home web sul template {template_id} ({home[0].name}).")
+    if not conferma:
+        print("\nProva a vuoto: non ho cambiato niente.")
+        print("Per impostarla davvero, rilancia con --yes.")
+        return
+
+    await client.set_home_page_web(device_id, template_id)
+    await client.release(device_id)
+    print(f"Configurazione nuova: {json.dumps(await client.get_home_page_config(device_id))}")
+    print("Premi il pulsante 2s per farla scaricare.")
+
+
 async def _publish(
     client: SwitchBotCanvasClient,
     device_id: str,
@@ -397,6 +492,8 @@ async def main() -> None:
             "frame",
             "wipe",
             "preview",
+            "agenda",
+            "homepage",
         ],
     )
     parser.add_argument(
@@ -423,7 +520,13 @@ async def main() -> None:
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="con `wipe`, cancella davvero invece di fare una prova a vuoto",
+        help="con `wipe` cancella davvero, con `homepage` imposta la home web; "
+        "senza, entrambi fanno una prova a vuoto",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="con `homepage`, salva la configurazione anche se e' gia' quella giusta",
     )
     args = parser.parse_args()
 
@@ -454,6 +557,9 @@ async def main() -> None:
                     raise SystemExit(f"Nessun template sullo slot {args.slot}.")
                 dati = await client.preview(sullo_slot[0].template_id, device_id)
                 print(json.dumps(dati, indent=2, ensure_ascii=False)[:2000])
+
+            elif args.command == "homepage":
+                await _homepage(client, device_id, args.yes, args.force)
 
             elif args.command == "wipe":
                 await _wipe(client, device_id, args.yes)
@@ -493,6 +599,15 @@ async def main() -> None:
                     args.slot,
                     "Sonda telaio",
                     build_frame_components(args.x0, args.y0, args.x1, args.y1),
+                )
+
+            elif args.command == "agenda":
+                await _publish(
+                    client,
+                    device_id,
+                    args.slot,
+                    "Agenda",
+                    build_agenda_components(datetime.now()),
                 )
 
             elif args.command == "metric":

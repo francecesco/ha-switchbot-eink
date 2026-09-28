@@ -10,6 +10,8 @@ import pytest
 from custom_components.switchbot_eink.layout.agenda import (
     CHAR_WIDTH_RATIO,
     FINESTRA_GIORNI,
+    MARGINE_SINISTRO,
+    MAX_EVENTI_DOMANI,
     MAX_EVENTI_OGGI,
     Event,
     build_agenda_page,
@@ -152,11 +154,13 @@ def test_la_pagina_finisce_sulla_home() -> None:
     assert build_agenda_page([], ADESSO)["page"] == "home"
 
 
-def test_lintestazione_nomina_il_giorno_di_oggi() -> None:
+def test_la_data_di_oggi_non_si_ripete() -> None:
+    """La barra laterale del firmware mostra gia' data e ora: ripeterle
+    sopra l'agenda ruba una riga agli eventi."""
     testi = testi_di(build_agenda_page([evento(20, "Riunione")], ADESSO))
 
-    # 23 agosto 2026 e' una domenica sul calendario gregoriano reale.
-    assert any("OGGI" in t and "domenica 23 agosto" in t for t in testi)
+    assert not any("OGGI" in t or "agosto" in t or "domenica" in t for t in testi)
+    assert testi[0] == "20:00", "la prima riga e' gia' un evento"
 
 
 def test_gli_eventi_di_oggi_compaiono_con_ora_e_titolo() -> None:
@@ -208,15 +212,48 @@ def test_esattamente_il_massimo_non_produce_la_riga_di_riepilogo() -> None:
     assert not any(t.startswith("+") and t.endswith("altri") for t in testi)
 
 
-def test_i_giorni_successivi_stanno_su_una_riga_ciascuno() -> None:
+def test_domani_e_una_lista_con_ora_e_titolo() -> None:
+    """Le 9 di domani vengono prima delle 17:24 di adesso come ora del giorno:
+    il filtro sugli eventi conclusi vale solo per oggi."""
     page = build_agenda_page(
-        [evento(9, "Dentista", giorno=1), evento(10, "Call", giorno=2)], ADESSO
+        [evento(9, "Dentista", giorno=1), evento(10, "Call", giorno=1)], ADESSO
     )
     testi = testi_di(page)
 
-    # 24 agosto 2026 e' lunedi, 25 agosto e' martedi.
-    assert any(t.startswith("LUN 24") and "Dentista" in t for t in testi)
-    assert any(t.startswith("MAR 25") and "Call" in t for t in testi)
+    assert "DOMANI" in testi
+    assert testi.index("DOMANI") < testi.index("09:00") < testi.index("Dentista")
+    assert testi.index("Dentista") < testi.index("10:00") < testi.index("Call")
+
+
+def test_domani_oltre_il_massimo_lo_dice() -> None:
+    eventi = [evento(8 + i, f"Domani {i}", giorno=1) for i in range(MAX_EVENTI_DOMANI + 2)]
+    testi = testi_di(build_agenda_page(eventi, ADESSO))
+
+    assert "+2 altri" in testi
+    assert f"Domani {MAX_EVENTI_DOMANI}" not in testi
+
+
+def test_domani_vuoto_lo_dice() -> None:
+    testi = testi_di(build_agenda_page([evento(20, "Riunione")], ADESSO))
+
+    assert "DOMANI" in testi
+    assert "Nessun evento" in testi
+
+
+def test_dopodomani_sta_su_una_riga() -> None:
+    page = build_agenda_page([evento(10, "Call", giorno=2)], ADESSO)
+
+    # 25 agosto 2026 e' martedi.
+    assert any(t.startswith("MAR 25") and "Call" in t for t in testi_di(page))
+
+
+def test_domani_e_dopodomani_non_si_confondono() -> None:
+    page = build_agenda_page(
+        [evento(9, "Dentista", giorno=1), evento(10, "Call", giorno=2)], ADESSO
+    )
+    riga_dopodomani = next(t for t in testi_di(page) if t.startswith("MAR 25"))
+
+    assert "Dentista" not in riga_dopodomani
 
 
 def test_la_finestra_scarta_quello_che_cade_oltre() -> None:
@@ -300,11 +337,12 @@ def test_la_riga_dei_marcatori_rispetta_la_nuova_geometria() -> None:
     ora = next(c for c in testuali if c["text"] == "18:00")
     titolo = next(c for c in testuali if c["text"] == "Riunione")
 
+    assert marcatore["position"][0] == MARGINE_SINISTRO
     assert marcatore["position"][2] == 20
     assert marcatore["style"]["fontSize"] == 14
-    assert ora["position"][0] == 24
-    assert titolo["position"][0] == 104
-    assert titolo["position"][2] == 456
+    assert ora["position"][0] == MARGINE_SINISTRO + 24
+    assert titolo["position"][0] == MARGINE_SINISTRO + 104
+    assert titolo["position"][0] + titolo["position"][2] == 560
 
 
 def test_i_titoli_non_passano_dal_motore_di_template() -> None:
@@ -359,10 +397,10 @@ def test_un_evento_che_finisce_a_mezzanotte_non_occupa_il_giorno_dopo() -> None:
         all_day=False,
         calendar="Personale",
     )
-    page = build_agenda_page([fino_a_mezzanotte], ADESSO)
-    riga_domani = next(t for t in testi_di(page) if t.startswith("LUN 24"))
+    testi = testi_di(build_agenda_page([fino_a_mezzanotte], ADESSO))
 
-    assert "Serata" not in riga_domani
+    assert testi.count("Serata") == 1
+    assert "Nessun evento" in testi, "domani resta vuoto"
 
 
 def test_la_pagina_non_dipende_dallordine_in_cui_arrivano_gli_eventi() -> None:
@@ -428,10 +466,17 @@ def _pagine_estreme() -> list[dict]:
             [evento(9, lungo, giorno=1)] * 6 + [evento(9, lungo, giorno=2)] * 6,
             ADESSO,
         ),
+        # Tutto pieno insieme, con i marcatori: oggi, domani e dopodomani.
+        build_agenda_page(
+            [*pieni, *[evento(8 + i, f"{lungo} {i}", "Lavoro", giorno=1) for i in range(5)],
+             evento(0, lungo, "Famiglia", giorno=2, all_day=True)],
+            ADESSO,
+            calendars=["Lavoro", "Famiglia"],
+        ),
     ]
 
 
-@pytest.mark.parametrize("indice", range(7))
+@pytest.mark.parametrize("indice", range(8))
 def test_nessuna_card_esce_dallarea_utile_in_nessuna_forma(indice: int) -> None:
     page = validate_page(_pagine_estreme()[indice])
 
@@ -440,7 +485,17 @@ def test_nessuna_card_esce_dallarea_utile_in_nessuna_forma(indice: int) -> None:
         assert rect_fits(Rect(x, y, w, h)), f"card {posizione} fuori: {card}"
 
 
-@pytest.mark.parametrize("indice", range(7))
+@pytest.mark.parametrize("indice", range(8))
+def test_nessuna_card_tocca_la_barra_laterale(indice: int) -> None:
+    """Sul pannello, testo a x=0 dell'area utile finisce attaccato alla barra
+    del firmware: serve aria fra le due."""
+    page = validate_page(_pagine_estreme()[indice])
+
+    for posizione, card in enumerate(page["cards"]):
+        assert card["position"][0] >= MARGINE_SINISTRO, f"card {posizione}: {card}"
+
+
+@pytest.mark.parametrize("indice", range(8))
 def test_nessuna_coppia_di_card_si_sovrappone(indice: int) -> None:
     """Il compilatore rifiuta le sovrapposizioni: una geometria sbagliata non
     degrada la pagina, la fa sparire."""
@@ -454,7 +509,7 @@ def test_nessuna_coppia_di_card_si_sovrappone(indice: int) -> None:
             )
 
 
-@pytest.mark.parametrize("indice", range(7))
+@pytest.mark.parametrize("indice", range(8))
 def test_ogni_forma_arriva_fino_ai_componenti(indice: int) -> None:
     componenti = compile_page(
         validate_page(_pagine_estreme()[indice]), lambda t: t, lambda _e: None

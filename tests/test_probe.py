@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
 from custom_components.switchbot_eink.api.models import TemplateSummary
 from tools.probe import (
+    build_agenda_components,
     build_clock_component,
     build_frame_components,
     build_ruler_components,
     read_credentials,
+    sample_agenda_events,
     templates_to_wipe,
 )
 
@@ -154,3 +157,51 @@ def test_lorologio_sta_a_destra_della_barra_laterale() -> None:
 
     assert css["x"] == 240
     assert css["x"] + css["w"] == 800
+
+
+@pytest.mark.parametrize(
+    "ora",
+    [
+        datetime(2026, 9, 28, 0, 5),
+        datetime(2026, 9, 28, 9, 0),
+        datetime(2026, 9, 28, 23, 50),
+    ],
+)
+def test_lagenda_di_prova_compila_a_qualunque_ora(ora: datetime) -> None:
+    """Gli eventi sono ancorati all'istante, quindi anche a mezzanotte meno
+    dieci la pagina deve restare valida: niente card fuori area o sovrapposte."""
+    componenti = build_agenda_components(ora)
+
+    assert componenti
+    identificativi = [c["id"] for c in componenti]
+    assert len(set(identificativi)) == len(identificativi)
+    for componente in componenti:
+        css = json.loads(componente["css"])
+        assert css["x"] >= 240
+        assert css["x"] + css["w"] <= 800
+
+
+def test_lagenda_di_prova_mostra_gli_eventi_di_oggi() -> None:
+    ora = datetime(2026, 9, 28, 9, 0)
+    testi = " ".join(
+        json.dumps(json.loads(c["extra"])["content"], ensure_ascii=False)
+        for c in build_agenda_components(ora)
+    )
+
+    assert "Evento in corso" in testi
+    assert "Riunione settimanale" in testi
+    # Oggi ce ne sono otto: cinque righe, e gli altri dichiarati, non spariti.
+    assert "+3 altri" in testi
+    assert "DOMANI" in testi
+    assert "Dentista" in testi
+
+
+def test_gli_eventi_di_prova_coprono_i_tre_giorni_e_due_calendari() -> None:
+    ora = datetime(2026, 9, 28, 9, 0)
+    eventi = sample_agenda_events(ora)
+
+    giorni = {e.start.date() for e in eventi}
+    assert {ora.date() + timedelta(days=n) for n in range(3)} <= giorni
+    assert len({e.calendar for e in eventi}) >= 2
+    assert any(e.all_day for e in eventi)
+    assert any(e.start < ora < e.end for e in eventi)

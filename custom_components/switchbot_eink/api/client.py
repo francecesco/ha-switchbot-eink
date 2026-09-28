@@ -9,6 +9,9 @@ from .auth import CanvasAuth, Tokens
 from .const import (
     DEVICE_TYPE_EINK,
     PATH_DEVICE_LIST,
+    PATH_HOMEPAGE_INFO,
+    PATH_HOMEPAGE_SAVE,
+    PATH_PAGES_LIST,
     PATH_TPL_CREATE,
     PATH_TPL_DEL,
     PATH_TPL_LIST,
@@ -141,3 +144,20 @@ class SwitchBotCanvasClient:
             PATH_TPL_PREVIEW, {"templateId": template_id, "deviceID": device_id}
         )
         return payload or {}
+
+    async def get_home_page_config(self, device_id: str) -> dict[str, Any]:
+        """Da dove il pannello prende la home: `pageSource` "web" o "app"."""
+        payload = await self._http.request(PATH_HOMEPAGE_INFO, {"deviceID": device_id})
+        return payload or {}
+
+    async def set_home_page_web(self, device_id: str, template_id: int) -> None:
+        """Fa mostrare al pannello il template indicato come home."""
+        await self._http.request(
+            PATH_HOMEPAGE_SAVE,
+            {"deviceID": device_id, "pageSource": "web", "templateID": template_id},
+        )
+
+    async def list_pages(self, device_id: str) -> list[dict[str, Any]]:
+        """Le pagine del page manager, cosi' come arrivano dal backend."""
+        payload = await self._http.request(PATH_PAGES_LIST, {"deviceID": device_id})
+        return (payload or {}).get("list") or [] if isinstance(payload, dict) else []
