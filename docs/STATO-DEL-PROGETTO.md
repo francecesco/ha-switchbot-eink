@@ -1,6 +1,8 @@
 # SwitchBot E-Ink — stato del progetto
 
-**Aggiornato al 28 settembre 2026.** Branch `feat/switchbot-eink`, 57 commit, 325 test verdi.
+**Aggiornato al 28 settembre 2026.** Pubblicato su `github.com/francecesco/ha-switchbot-eink`
+(branch `master`), versione 0.2.0, 342 test verdi. Installato via HACS e in uso con i
+calendari veri.
 
 Questo file serve a riprendere il lavoro dopo una pausa. I documenti di riferimento restano
 la spec (`docs/superpowers/specs/2026-08-22-switchbot-eink-ha-design.md`) e il piano
@@ -169,6 +171,8 @@ custom_components/switchbot_eink/
 ├── entity.py             base comune alle entità diagnostiche
 ├── sensor.py             ultima pubblicazione riuscita
 ├── binary_sensor.py      stato dell'autenticazione
+├── button.py             "Aggiorna agenda": ripubblica subito il suo pannello
+├── brand/                icona servita da Home Assistant (generata da tools/make_icon.py)
 └── __init__.py           setup, servizio refresh, ciclo di vita
 ```
 
@@ -206,6 +210,21 @@ configurabile dalle opzioni.
 **Servizio.** `switchbot_eink.refresh` forza la pubblicazione ignorando l'impronta, ma
 rispetta comunque l'intervallo minimo di 60 secondi. È la coppia naturale della pressione
 lunga sul pulsante.
+
+**Pulsante.** *Aggiorna agenda* fa quello che fa `refresh`, ma solo per il suo pannello: è
+il modo di aggiornare senza passare dagli strumenti per sviluppatori, e si mette in una
+dashboard. È un controllo, non un'entità diagnostica, e resta disponibile anche a
+pubblicazione guasta: premerlo mostra l'errore.
+
+**Lingua del pannello.** I testi fissi dell'agenda (`DOMANI`/`TOMORROW`, `+N altri`/`+N
+more`, `agg.`/`updated`, i giorni) seguono `hass.config.language`, letta ad ogni ciclo:
+cambiarla cambia l'impronta e ripubblica. Tabella `TESTI` in `layout/agenda.py`, con
+italiano e inglese; ogni altra lingua ripiega sull'inglese. Il README è in inglese; commenti,
+test e documenti interni restano in italiano.
+
+**Icona.** Da Home Assistant 2026.8 un'integrazione custom serve le sue immagini dalla
+cartella `brand/` accanto al manifest, senza PR a `home-assistant/brands`. HACS nel suo
+elenco può mostrare ancora il segnaposto: per quello servirebbe la PR.
 
 **Entità diagnostiche.** Un sensore con l'ora dell'ultima pubblicazione riuscita e un binary
 sensor con lo stato dell'autenticazione. Restano **sempre disponibili**, anche durante un
