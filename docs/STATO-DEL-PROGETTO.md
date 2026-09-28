@@ -315,9 +315,13 @@ Da fare quando ci si arriva:
 
 ## Note operative
 
-**Identità git.** Questo progetto usa l'account GitHub **privato**: `francecesco`
-(`192597588+francecesco@users.noreply.github.com`), mai quello aziendale. Il repository ha già l'identità corretta in
-`git config --local`, quindi **non passare `-c user.email` ai commit**. Per `gh` usare
+**Identità git.** Questo progetto usa l'account GitHub **privato**: `francecesco`, mai
+quello aziendale. Il repository è pubblico su `github.com/francecesco/ha-switchbot-eink`, e
+per questo i commit sono firmati con l'indirizzo noreply di GitHub
+(`192597588+francecesco@users.noreply.github.com`), già impostato in `git config --local`:
+**non passare `-c user.email` ai commit**. La history è stata riscritta il 28 settembre
+prima della pubblicazione, per togliere ID del pannello, città ed email personale; negli
+esempi l'ID del pannello è `AABBCCDDEEFF`. Per `gh` usare
 `GH_TOKEN=$(gh auth token --user francecesco) gh <comando>`, mai `gh auth switch`, che è
 globale e cambierebbe le cose anche negli altri progetti.
 

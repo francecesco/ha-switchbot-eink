@@ -4,10 +4,10 @@
   "after_dependencies": ["calendar"],
   "codeowners": ["@francecesco"],
   "config_flow": true,
-  "documentation": "https://github.com/francecesco/switchbot-eink",
+  "documentation": "https://github.com/francecesco/ha-switchbot-eink",
   "integration_type": "device",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/francecesco/switchbot-eink/issues",
+  "issue_tracker": "https://github.com/francecesco/ha-switchbot-eink/issues",
   "requirements": [],
   "version": "0.1.0"
 }

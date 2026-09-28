@@ -66,7 +66,7 @@ inviti e calendari condivisi, e un titolo con delle graffe non deve essere esegu
 ## Installazione
 
 **Via HACS.** In HACS, menu ⋮ → *Repository personalizzati*, aggiungere
-`https://github.com/francecesco/switchbot-eink` con categoria *Integrazione*. Poi
+`https://github.com/francecesco/ha-switchbot-eink` con categoria *Integrazione*. Poi
 installare **SwitchBot E-Ink Home Dashboard** e riavviare Home Assistant.
 
 **Manualmente.** Copiare `custom_components/switchbot_eink` nella cartella
