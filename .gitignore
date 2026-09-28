@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+
+# Le immagini del brand vanno sempre nel repository: un ignore globale su
+# "logo.png" le aveva tenute fuori, e Home Assistant non le avrebbe trovate.
+!custom_components/switchbot_eink/brand/*.png
