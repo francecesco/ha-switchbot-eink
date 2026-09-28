@@ -304,13 +304,15 @@ def sample_agenda_events(now: datetime) -> list[Event]:
     ]
 
 
-def build_agenda_components(now: datetime) -> list[dict[str, str]]:
+def build_agenda_components(now: datetime, language: str = "it") -> list[dict[str, str]]:
     """Lo stesso percorso del coordinator: genera, valida, compila.
 
     Le card dell'agenda hanno `template: false` e nessuna entita', quindi
     renderer e resolver non vengono mai interpellati sul serio.
     """
-    pagina = validate_page(build_agenda_page(sample_agenda_events(now), now))
+    pagina = validate_page(
+        build_agenda_page(sample_agenda_events(now), now, language=language)
+    )
     return compile_page(pagina, lambda testo: testo, lambda _entita: None)
 
 
@@ -524,6 +526,11 @@ async def main() -> None:
         "senza, entrambi fanno una prova a vuoto",
     )
     parser.add_argument(
+        "--lang",
+        default="it",
+        help="con `agenda`, la lingua dei testi del pannello, es. en (default: it)",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="con `homepage`, salva la configurazione anche se e' gia' quella giusta",
@@ -607,7 +614,7 @@ async def main() -> None:
                     device_id,
                     args.slot,
                     "Agenda",
-                    build_agenda_components(datetime.now()),
+                    build_agenda_components(datetime.now(), args.lang),
                 )
 
             elif args.command == "metric":

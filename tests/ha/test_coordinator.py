@@ -788,6 +788,7 @@ async def test_nessun_calendario_scelto_produce_l_agenda_vuota_senza_eccezioni(
 ) -> None:
     """Stato iniziale dopo l'installazione: nessuna eccezione, agenda vuota."""
     freezer.move_to(ADESSO_UTC)
+    hass.config.language = "it"
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="DEV1",
@@ -803,6 +804,47 @@ async def test_nessun_calendario_scelto_produce_l_agenda_vuota_senza_eccezioni(
         testo and "Nessun evento nei prossimi 3 giorni" in testo
         for testo in _testi_delle_card(template)
     )
+
+
+@pytest.mark.parametrize(
+    ("lingua", "atteso"),
+    [("it", "Nessun evento nei prossimi 3 giorni"), ("en", "No events in the next 3 days")],
+)
+async def test_il_pannello_parla_la_lingua_di_home_assistant(
+    hass: HomeAssistant, client, freezer, lingua: str, atteso: str
+) -> None:
+    freezer.move_to(ADESSO_UTC)
+    hass.config.language = lingua
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="DEV1", data={**DATI_BASE, CONF_TEMPLATE_ID: 77}
+    )
+    entry.add_to_hass(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+
+    assert await coordinatore.async_publish() is True
+
+    template = client.update_template.await_args.args[0]
+    assert atteso in _testi_delle_card(template)
+
+
+async def test_cambiare_lingua_ripubblica_anche_a_eventi_invariati(
+    hass: HomeAssistant, client, freezer
+) -> None:
+    """La lingua entra nell'impronta: altrimenti il pannello resterebbe nella
+    lingua vecchia finche' non cambia un evento."""
+    freezer.move_to(ADESSO_UTC)
+    hass.config.language = "it"
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="DEV1", data={**DATI_BASE, CONF_TEMPLATE_ID: 77}
+    )
+    entry.add_to_hass(hass)
+    coordinatore = SwitchBotEinkCoordinator(hass, entry, client)
+    assert await coordinatore.async_publish() is True
+
+    freezer.tick(timedelta(minutes=5))
+    hass.config.language = "en"
+
+    assert await coordinatore.async_publish() is True
 
 
 async def test_i_marcatori_restano_anche_se_un_calendario_non_ha_eventi(

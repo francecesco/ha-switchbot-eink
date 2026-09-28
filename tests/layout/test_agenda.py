@@ -516,3 +516,67 @@ def test_ogni_forma_arriva_fino_ai_componenti(indice: int) -> None:
     )
 
     assert componenti
+
+
+# ---- lingua dei testi del pannello -----------------------------------------
+
+
+def _pagina_completa(language: str | None = None) -> dict:
+    """Una pagina che attraversa tutti i testi fissi: oggi pieno, un evento di
+    tutto il giorno, domani oltre il massimo, dopodomani con un evento."""
+    eventi = [
+        evento(0, "Ferie", all_day=True),
+        *[evento_attivo(10 * i, f"Oggi {i}") for i in range(MAX_EVENTI_OGGI + 2)],
+        *[evento(8 + i, f"Domani {i}", giorno=1) for i in range(MAX_EVENTI_DOMANI + 2)],
+        evento(0, "Trasloco", giorno=2, all_day=True),
+    ]
+    if language is None:
+        return build_agenda_page(eventi, ADESSO)
+    return build_agenda_page(eventi, ADESSO, language=language)
+
+
+def test_in_inglese_i_testi_del_pannello_sono_inglesi() -> None:
+    testi = testi_di(_pagina_completa("en"))
+
+    assert "TOMORROW" in testi
+    assert "All day · Ferie" in testi
+    assert "+3 more" in testi, "oggi: otto eventi (Ferie compreso), cinque righe"
+    assert "+2 more" in testi, "domani: quattro eventi, due righe"
+    # 25 agosto 2026 e' martedi.
+    assert "TUE 25   Trasloco (all day)" in testi
+    assert "updated 17:24" in testi
+
+
+def test_in_inglese_non_resta_niente_di_italiano() -> None:
+    testi = " ".join(testi_di(_pagina_completa("en")))
+
+    for parola in ("DOMANI", "altri", "Tutto il giorno", "tutto il giorno", "agg.", "MAR 25"):
+        assert parola not in testi
+
+
+def test_in_inglese_anche_i_segnaposto_sono_inglesi() -> None:
+    assert "No events in the next 3 days" in testi_di(
+        build_agenda_page([], ADESSO, language="en")
+    )
+    domani_vuoto = testi_di(build_agenda_page([evento(20, "Cena")], ADESSO, language="en"))
+    assert "No events" in domani_vuoto
+    oggi_vuoto = testi_di(
+        build_agenda_page([evento(9, "Dentista", giorno=1)], ADESSO, language="en")
+    )
+    assert "No events today" in oggi_vuoto
+    oggi_concluso = testi_di(build_agenda_page([evento(8, "Colazione")], ADESSO, language="en"))
+    assert "No more events today" in oggi_concluso
+
+
+def test_senza_lingua_il_pannello_resta_in_italiano() -> None:
+    assert _pagina_completa() == _pagina_completa("it")
+
+
+def test_una_lingua_sconosciuta_ripiega_sullinglese() -> None:
+    assert _pagina_completa("de") == _pagina_completa("en")
+
+
+def test_la_variante_regionale_conta_come_la_sua_lingua() -> None:
+    """Home Assistant usa codici come "en-GB" e "pt-BR"."""
+    assert _pagina_completa("en-GB") == _pagina_completa("en")
+    assert _pagina_completa("it-IT") == _pagina_completa("it")

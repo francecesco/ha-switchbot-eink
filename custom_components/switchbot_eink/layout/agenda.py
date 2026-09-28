@@ -13,11 +13,67 @@ from typing import Any
 
 from .const import USABLE_WIDTH
 
-# Il pannello e' configurato in italiano — lo dichiara la risposta di `preview` —
-# quindi i nomi stanno qui. Estrarli in un catalogo di lingue e' un problema per
-# quando servira' la seconda lingua. La data di oggi non compare: la barra
-# laterale del firmware la mostra gia'.
-GIORNI_BREVI: tuple[str, ...] = ("LUN", "MAR", "MER", "GIO", "VEN", "SAB", "DOM")
+# La data di oggi non compare: la barra laterale del firmware la mostra gia'.
+
+
+@dataclass(frozen=True, slots=True)
+class Testi:
+    """I testi fissi del pannello in una lingua. I segnaposto sono per `format`."""
+
+    giorni_brevi: tuple[str, ...]
+    domani: str
+    altri: str
+    nessun_evento: str
+    nessun_evento_oggi: str
+    nessun_altro_evento_oggi: str
+    nessun_evento_finestra: str
+    nessun_evento_riga: str
+    tutto_il_giorno: str
+    tutto_il_giorno_sintesi: str
+    in_corso: str
+    aggiornato: str
+
+
+TESTI: dict[str, Testi] = {
+    "it": Testi(
+        giorni_brevi=("LUN", "MAR", "MER", "GIO", "VEN", "SAB", "DOM"),
+        domani="DOMANI",
+        altri="+{n} altri",
+        nessun_evento="Nessun evento",
+        nessun_evento_oggi="Nessun evento oggi",
+        nessun_altro_evento_oggi="Nessun altro evento oggi",
+        nessun_evento_finestra="Nessun evento nei prossimi {n} giorni",
+        nessun_evento_riga="nessun evento",
+        tutto_il_giorno="Tutto il giorno · {titolo}",
+        tutto_il_giorno_sintesi="{titolo} (tutto il giorno)",
+        in_corso="In corso · {titolo}",
+        aggiornato="agg. {ora}",
+    ),
+    "en": Testi(
+        giorni_brevi=("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"),
+        domani="TOMORROW",
+        altri="+{n} more",
+        nessun_evento="No events",
+        nessun_evento_oggi="No events today",
+        nessun_altro_evento_oggi="No more events today",
+        nessun_evento_finestra="No events in the next {n} days",
+        nessun_evento_riga="no events",
+        tutto_il_giorno="All day · {titolo}",
+        tutto_il_giorno_sintesi="{titolo} (all day)",
+        in_corso="Ongoing · {titolo}",
+        aggiornato="updated {ora}",
+    ),
+}
+
+# Chi non ha la sua lingua in tabella legge l'inglese, non l'italiano.
+LINGUA_DI_RIPIEGO = "en"
+
+
+def testi_per(language: str) -> Testi:
+    """I testi per un codice di lingua di Home Assistant ("it", "en-GB", ...)."""
+    base = language.split("-")[0].split("_")[0].lower()
+    return TESTI.get(base, TESTI[LINGUA_DI_RIPIEGO])
+
 
 FINESTRA_GIORNI = 3
 MAX_EVENTI_OGGI = 5
@@ -162,19 +218,19 @@ def _chiave_ordine(evento: Event, giorno: date) -> tuple[bool, datetime, str, st
     return (not in_corso, evento.start, evento.summary, evento.calendar)
 
 
-def _sintesi(evento: Event, giorno: date) -> str:
+def _sintesi(evento: Event, giorno: date, t: Testi) -> str:
     if evento.all_day:
-        return f"{evento.summary} (tutto il giorno)"
+        return t.tutto_il_giorno_sintesi.format(titolo=evento.summary)
     if evento.start.date() < giorno:
-        return f"In corso · {evento.summary}"
+        return t.in_corso.format(titolo=evento.summary)
     return f"{evento.start.strftime('%H:%M')} {evento.summary}"
 
 
-def _riga_giorno(giorno: date, eventi: Sequence[Event]) -> str:
-    etichetta = f"{GIORNI_BREVI[giorno.weekday()]} {giorno.day}"
+def _riga_giorno(giorno: date, eventi: Sequence[Event], t: Testi) -> str:
+    etichetta = f"{t.giorni_brevi[giorno.weekday()]} {giorno.day}"
     if not eventi:
-        return f"{etichetta}   nessun evento"
-    return f"{etichetta}   " + " · ".join(_sintesi(e, giorno) for e in eventi)
+        return f"{etichetta}   {t.nessun_evento_riga}"
+    return f"{etichetta}   " + " · ".join(_sintesi(e, giorno, t) for e in eventi)
 
 
 def _per_giorno(
@@ -189,16 +245,16 @@ def _per_giorno(
     return raggruppati
 
 
-def _titolo_riga(evento: Event, giorno: date) -> tuple[str, str]:
+def _titolo_riga(evento: Event, giorno: date, t: Testi) -> tuple[str, str]:
     """(ora, titolo) per la riga di un evento nella lista di un giorno.
 
     Un evento in corso non ha un'ora d'inizio sensata da mostrare quel giorno:
     viene da un giorno precedente.
     """
     if evento.all_day:
-        return "", f"Tutto il giorno · {evento.summary}"
+        return "", t.tutto_il_giorno.format(titolo=evento.summary)
     if evento.start.date() < giorno:
-        return "", f"In corso · {evento.summary}"
+        return "", t.in_corso.format(titolo=evento.summary)
     return evento.start.strftime("%H:%M"), evento.summary
 
 
@@ -209,6 +265,7 @@ def build_agenda_page(
     page_slot: str = "home",
     name: str = "Agenda",
     stamp: bool = True,
+    language: str = "it",
 ) -> dict[str, Any]:
     """Costruisce la definizione di pagina dell'agenda.
 
@@ -218,7 +275,11 @@ def build_agenda_page(
     `stamp=False` omette la card "agg. HH:MM": chi confronta due pagine per
     decidere se ripubblicare deve poter escludere l'orario, altrimenti cambia
     ad ogni minuto e il confronto non serve a niente.
+
+    `language` e' il codice di lingua di Home Assistant: sceglie i testi fissi
+    del pannello, con l'inglese per le lingue che non sono in `TESTI`.
     """
+    t = testi_per(language)
     oggi = now.date()
     giorni = [oggi + timedelta(days=scarto) for scarto in range(FINESTRA_GIORNI)]
     raggruppati = _per_giorno(events, giorni)
@@ -233,21 +294,21 @@ def build_agenda_page(
     if not any(raggruppati.values()):
         cards.append(
             _card(
-                f"Nessun evento nei prossimi {FINESTRA_GIORNI} giorni",
+                t.nessun_evento_finestra.format(n=FINESTRA_GIORNI),
                 (_X, 140, _LARGHEZZA, 32),
                 _CORPO_EVENTO,
                 "center",
             )
         )
     else:
-        cards.extend(_righe_di_oggi(raggruppati[oggi], marcatori, now, oggi))
+        cards.extend(_righe_di_oggi(raggruppati[oggi], marcatori, now, oggi, t))
         cards.append(_filetto(_Y_FILETTO))
-        cards.extend(_righe_di_domani(raggruppati[giorni[1]], marcatori, giorni[1]))
+        cards.extend(_righe_di_domani(raggruppati[giorni[1]], marcatori, giorni[1], t))
         for indice, giorno in enumerate(giorni[2:]):
             cards.append(
                 _card(
                     truncate(
-                        _riga_giorno(giorno, raggruppati[giorno]),
+                        _riga_giorno(giorno, raggruppati[giorno], t),
                         _LARGHEZZA,
                         _CORPO_GIORNO,
                     ),
@@ -260,7 +321,7 @@ def build_agenda_page(
     if stamp:
         cards.append(
             _card(
-                f"agg. {now.strftime('%H:%M')}",
+                t.aggiornato.format(ora=now.strftime("%H:%M")),
                 (360, _Y_AGGIORNAMENTO, 200, 22),
                 _CORPO_AGGIORNAMENTO,
                 "right",
@@ -271,7 +332,11 @@ def build_agenda_page(
 
 
 def _righe_di_oggi(
-    eventi: Sequence[Event], marcatori: dict[str, str], now: datetime, oggi: date
+    eventi: Sequence[Event],
+    marcatori: dict[str, str],
+    now: datetime,
+    oggi: date,
+    t: Testi,
 ) -> list[dict[str, Any]]:
     if not eventi:
         # Oggi non copre nessun evento, ma la finestra non e' vuota (altrimenti
@@ -279,7 +344,7 @@ def _righe_di_oggi(
         # 230 px di bianco che sembrano un guasto.
         return [
             _card(
-                "Nessun evento oggi",
+                t.nessun_evento_oggi,
                 (_X, _Y_PRIMA_RIGA, _LARGHEZZA, 30),
                 _CORPO_EVENTO,
                 "center",
@@ -293,7 +358,7 @@ def _righe_di_oggi(
     if not attivi:
         return [
             _card(
-                "Nessun altro evento oggi",
+                t.nessun_altro_evento_oggi,
                 (_X, _Y_PRIMA_RIGA, _LARGHEZZA, 30),
                 _CORPO_EVENTO,
                 "center",
@@ -302,26 +367,26 @@ def _righe_di_oggi(
 
     righe, nascosti = _righe_eventi(
         attivi, marcatori, oggi, _Y_PRIMA_RIGA, _ALTEZZA_RIGA, _CORPO_EVENTO,
-        MAX_EVENTI_OGGI,
+        MAX_EVENTI_OGGI, t,
     )
     if nascosti:
-        righe.append(_altri(nascosti, _Y_RIEPILOGO))
+        righe.append(_altri(nascosti, _Y_RIEPILOGO, t))
     return righe
 
 
 def _righe_di_domani(
-    eventi: Sequence[Event], marcatori: dict[str, str], domani: date
+    eventi: Sequence[Event], marcatori: dict[str, str], domani: date, t: Testi
 ) -> list[dict[str, Any]]:
     """Un'anteprima di domani: etichetta e i primi eventi, in corpo minore.
 
     Nessun filtro sugli eventi conclusi: domani non e' ancora cominciato, e
     un evento alle 9 viene prima dell'ora di adesso solo come ora del giorno.
     """
-    cards = [_card("DOMANI", (_X, _Y_DOMANI, 200, 24), _CORPO_GIORNO)]
+    cards = [_card(t.domani, (_X, _Y_DOMANI, 200, 24), _CORPO_GIORNO)]
     if not eventi:
         cards.append(
             _card(
-                "Nessun evento",
+                t.nessun_evento,
                 (_X, _Y_PRIMA_RIGA_DOMANI, _LARGHEZZA, 28),
                 _CORPO_EVENTO_DOMANI,
             )
@@ -330,18 +395,18 @@ def _righe_di_domani(
 
     righe, nascosti = _righe_eventi(
         eventi, marcatori, domani, _Y_PRIMA_RIGA_DOMANI, _ALTEZZA_RIGA_DOMANI,
-        _CORPO_EVENTO_DOMANI, MAX_EVENTI_DOMANI,
+        _CORPO_EVENTO_DOMANI, MAX_EVENTI_DOMANI, t,
     )
     cards.extend(righe)
     if nascosti:
         # Sulla riga dell'etichetta: una riga in piu' qui non c'e'.
-        cards.append(_altri(nascosti, _Y_DOMANI))
+        cards.append(_altri(nascosti, _Y_DOMANI, t))
     return cards
 
 
-def _altri(nascosti: int, y: int) -> dict[str, Any]:
+def _altri(nascosti: int, y: int, t: Testi) -> dict[str, Any]:
     """Far sparire eventi in silenzio e' peggio che dire quanti ne mancano."""
-    return _card(f"+{nascosti} altri", (360, y, 200, 24), _CORPO_GIORNO, "right")
+    return _card(t.altri.format(n=nascosti), (360, y, 200, 24), _CORPO_GIORNO, "right")
 
 
 def _righe_eventi(
@@ -352,6 +417,7 @@ def _righe_eventi(
     altezza_riga: int,
     corpo: int,
     massimo: int,
+    t: Testi,
 ) -> tuple[list[dict[str, Any]], int]:
     """Le righe marcatore/ora/titolo dei primi `massimo` eventi, e quanti ne
     restano fuori."""
@@ -379,7 +445,7 @@ def _righe_eventi(
                 )
             )
 
-        ora, titolo = _titolo_riga(evento, giorno)
+        ora, titolo = _titolo_riga(evento, giorno, t)
 
         # Un evento di tutto il giorno, o gia' in corso, non ha un'ora da
         # mostrare: niente card vuota nella colonna dell'ora.

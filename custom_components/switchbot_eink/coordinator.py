@@ -406,12 +406,15 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
         eventi = await self._eventi()
         ora = dt_util.now().replace(tzinfo=None)
         scelti = self._calendari_scelti()
+        # Letta ad ogni ciclo, non all'avvio: se l'utente cambia lingua, i testi
+        # cambiano, l'impronta con loro, e il pannello si ripubblica da solo.
+        lingua = self.hass.config.language
 
         # L'ora di aggiornamento cambia ad ogni minuto: se entrasse nel
         # confronto, l'hash non impedirebbe mai una pubblicazione. Si confronta
         # una pagina senza quella card e si pubblica quella con.
         confronto = validate_page(
-            build_agenda_page(eventi, ora, calendars=scelti, stamp=False)
+            build_agenda_page(eventi, ora, calendars=scelti, stamp=False, language=lingua)
         )
         impronta = components_hash(compile_page(confronto, self._render, self._resolve))
 
@@ -427,7 +430,9 @@ class SwitchBotEinkCoordinator(DataUpdateCoordinator[None]):
             )
             return False
 
-        pagina = validate_page(build_agenda_page(eventi, ora, calendars=scelti))
+        pagina = validate_page(
+            build_agenda_page(eventi, ora, calendars=scelti, language=lingua)
+        )
         components = compile_page(pagina, self._render, self._resolve)
 
         try:

@@ -205,3 +205,14 @@ def test_gli_eventi_di_prova_coprono_i_tre_giorni_e_due_calendari() -> None:
     assert len({e.calendar for e in eventi}) >= 2
     assert any(e.all_day for e in eventi)
     assert any(e.start < ora < e.end for e in eventi)
+
+
+def test_lagenda_di_prova_si_puo_vedere_in_inglese() -> None:
+    ora = datetime(2026, 9, 28, 9, 0)
+    testi = " ".join(
+        json.dumps(json.loads(c["extra"])["content"], ensure_ascii=False)
+        for c in build_agenda_components(ora, language="en")
+    )
+
+    assert "TOMORROW" in testi
+    assert "DOMANI" not in testi
