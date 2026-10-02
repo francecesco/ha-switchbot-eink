@@ -1,7 +1,7 @@
 # SwitchBot E-Ink — stato del progetto
 
 **Aggiornato al 28 settembre 2026.** Pubblicato su `github.com/francecesco/ha-switchbot-eink`
-(branch `master`), versione 0.3.0, 347 test verdi. Installato via HACS e in uso con i
+(branch `master`), versione 0.4.0, 355 test verdi. Installato via HACS e in uso con i
 calendari veri.
 
 Questo file serve a riprendere il lavoro dopo una pausa. I documenti di riferimento restano
@@ -188,9 +188,14 @@ L'agenda **non è un percorso parallelo**: è un generatore che produce la stess
 
 ## Come si comporta l'integrazione
 
-**Configurazione.** Email, password e regione; poi si sceglie il pannello. La password non
-viene mai salvata: si persistono i token, `user_id`, `device_id` e regione. Se il refresh
-token viene revocato parte il reauth flow.
+**Configurazione.** Email, password e regione; poi si sceglie il pannello. Si persistono
+token, `user_id`, `device_id`, regione **e password** (dalla 0.4.0). Il refresh token di
+SwitchBot ha una vita limitata e `/token/refresh` non ne restituisce mai uno nuovo
+(verificato nel bundle dell'editor web, che su refresh fallito fa semplicemente logout):
+senza la password il reauth scattava ogni notte. Ora il client, su 401 (HTTP o
+`resultCode` nell'envelope), prova il refresh e, se fallisce, rifa' il login con la
+password salvata; il reauth flow parte solo se anche quello fallisce. Le entry create
+prima della 0.4.0 non hanno la password: il reauth la chiede una volta e la salva.
 
 **Opzioni.** Quali calendari mostrare (scelta multipla fra le entità `calendar.*`) e ogni
 quanto ripubblicare. Cambiarle ricarica la entry.

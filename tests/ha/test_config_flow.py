@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant import config_entries
+from homeassistant.const import CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 
@@ -90,7 +91,11 @@ async def test_flusso_completo_crea_la_entry(hass: HomeAssistant) -> None:
     assert result["data"][CONF_REGION] == "eu"
 
 
-async def test_la_password_non_viene_persistita(hass: HomeAssistant) -> None:
+async def test_la_password_viene_persistita_per_il_login_automatico(
+    hass: HomeAssistant,
+) -> None:
+    """Il refresh token scade e il backend non ne da' mai uno nuovo: senza la
+    password salvata, ogni scadenza finirebbe in un reauth chiesto all'utente."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -105,7 +110,7 @@ async def test_la_password_non_viene_persistita(hass: HomeAssistant) -> None:
         )
         await hass.async_block_till_done()
 
-    assert "password" not in result["data"]
+    assert result["data"][CONF_PASSWORD] == "segreta"
 
 
 async def test_credenziali_errate_mostrano_l_errore(hass: HomeAssistant) -> None:
@@ -268,6 +273,7 @@ async def test_reauth_riscrive_i_token_senza_creare_una_entry(
     assert result["reason"] == "reauth_successful"
     assert entry.data[CONF_ACCESS_TOKEN] == "AT"
     assert entry.data[CONF_REFRESH_TOKEN] == "RT"
+    assert entry.data[CONF_PASSWORD] == "nuova"
 
 
 async def test_reauth_con_password_errata_mostra_l_errore(hass: HomeAssistant) -> None:

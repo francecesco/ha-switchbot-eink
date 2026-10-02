@@ -10,7 +10,7 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import (
 )
 from yarl import URL
 
-from custom_components.switchbot_eink.api.auth import Tokens
+from custom_components.switchbot_eink.api.auth import Credentials, Tokens
 from custom_components.switchbot_eink.api.client import SwitchBotCanvasClient
 from custom_components.switchbot_eink.api.errors import SwitchBotCanvasAuthError
 from custom_components.switchbot_eink.api.models import (
@@ -338,3 +338,107 @@ async def test_update_template_omette_sort_order_per_uno_slot_sconosciuto(
     _method, _url, body, _headers = aioclient.mock_calls[0]
 
     assert "sortOrder" not in body
+
+
+LOGIN_URL = f"{ACCOUNT}/account/api/v1/user/login"
+REFRESH_URL = f"{ACCOUNT}/account/api/v1/user/token/refresh"
+CREDENZIALI = Credentials(username="mario@example.test", password="segreta")
+
+
+async def test_refresh_fallito_rifa_il_login_con_la_password_salvata(aioclient, session) -> None:
+    """Il refresh token ha una vita limitata e il backend non lo rinnova mai:
+    quando scade, con la password salvata il client rifa' il login da solo
+    invece di chiedere all'utente."""
+    release_url = f"{BASE}/web/v1/user/templates/release"
+    aioclient.post(
+        release_url,
+        side_effect=response_sequence(
+            AiohttpClientMockResponse("post", URL(release_url), status=401),
+            AiohttpClientMockResponse(
+                "post", URL(release_url), status=200, json={"resultCode": 100, "data": None}
+            ),
+        ),
+    )
+    aioclient.post(REFRESH_URL, json={"statusCode": 160, "message": "refresh token scaduto"})
+    aioclient.post(
+        LOGIN_URL,
+        json={"statusCode": 100, "body": {"access_token": "AT3", "refresh_token": "RT3"}},
+    )
+    client = SwitchBotCanvasClient(
+        session, "eu", TOKENS, user_id="user-1", credentials=CREDENZIALI
+    )
+
+    await client.release("A")
+
+    assert client.tokens.access_token == "AT3"
+    assert client.tokens.refresh_token == "RT3", "il login porta un refresh token nuovo"
+    login = [c for c in aioclient.mock_calls if str(c[1]) == LOGIN_URL]
+    assert len(login) == 1
+    assert login[0][2]["username"] == "mario@example.test"
+    assert login[0][2]["password"] == "segreta"
+    _method, _url, _body, headers = aioclient.mock_calls[-1]
+    assert headers["Authorization"] == "AT3", "la ripetizione usa il token del nuovo login"
+
+
+async def test_il_login_automatico_non_scatta_se_il_refresh_riesce(aioclient, session) -> None:
+    release_url = f"{BASE}/web/v1/user/templates/release"
+    aioclient.post(
+        release_url,
+        side_effect=response_sequence(
+            AiohttpClientMockResponse("post", URL(release_url), status=401),
+            AiohttpClientMockResponse(
+                "post", URL(release_url), status=200, json={"resultCode": 100, "data": None}
+            ),
+        ),
+    )
+    aioclient.post(
+        REFRESH_URL,
+        json={"statusCode": 100, "body": {"access_token": "AT2", "token_type": "Bearer"}},
+    )
+    aioclient.post(
+        LOGIN_URL,
+        json={"statusCode": 100, "body": {"access_token": "X", "refresh_token": "Y"}},
+    )
+    client = SwitchBotCanvasClient(
+        session, "eu", TOKENS, user_id="user-1", credentials=CREDENZIALI
+    )
+
+    await client.release("A")
+
+    assert client.tokens.access_token == "AT2"
+    assert not [c for c in aioclient.mock_calls if str(c[1]) == LOGIN_URL]
+
+
+async def test_refresh_e_login_falliti_sollevano_auth_error(aioclient, session) -> None:
+    """Password cambiata: solo allora serve davvero l'utente."""
+    aioclient.post(f"{BASE}/web/v1/user/templates/release", status=401)
+    aioclient.post(REFRESH_URL, json={"statusCode": 160, "message": "refresh token scaduto"})
+    aioclient.post(LOGIN_URL, json={"statusCode": 160, "message": "wrong password"})
+    client = SwitchBotCanvasClient(
+        session, "eu", TOKENS, user_id="user-1", credentials=CREDENZIALI
+    )
+
+    with pytest.raises(SwitchBotCanvasAuthError):
+        await client.release("A")
+
+    assert client.tokens == TOKENS, "i token non vengono sporcati da un login fallito"
+
+
+async def test_senza_password_salvata_il_refresh_fallito_e_un_auth_error(
+    aioclient, session, caplog
+) -> None:
+    """Le entry create prima del salvataggio della password: il reauth la chiede
+    una volta, e il motivo del fallimento finisce nei log."""
+    aioclient.post(f"{BASE}/web/v1/user/templates/release", status=401)
+    aioclient.post(REFRESH_URL, json={"statusCode": 160, "message": "refresh token scaduto"})
+    aioclient.post(
+        LOGIN_URL,
+        json={"statusCode": 100, "body": {"access_token": "X", "refresh_token": "Y"}},
+    )
+    client = SwitchBotCanvasClient(session, "eu", TOKENS, user_id="user-1")
+
+    with pytest.raises(SwitchBotCanvasAuthError):
+        await client.release("A")
+
+    assert not [c for c in aioclient.mock_calls if str(c[1]) == LOGIN_URL]
+    assert "refresh token scaduto" in caplog.text

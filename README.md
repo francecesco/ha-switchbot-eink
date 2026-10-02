@@ -97,8 +97,15 @@ Manual alternative: copy `custom_components/switchbot_eink` from this repository
 2. Enter the email, password and region (`eu`, `us` or `ap`) of your SwitchBot account.
 3. Choose your panel from the list.
 
-The password is not stored: after signing in, only the tokens are kept. If the token is
-revoked, Home Assistant asks you to sign in again.
+The password is stored in Home Assistant, together with the tokens. SwitchBot's refresh
+token has a limited lifetime and is never renewed, so without the password the integration
+would ask you to sign in again every day. With it, the integration signs in again on its
+own; Home Assistant only asks for the password if that sign-in fails, for example after you
+changed it.
+
+If you installed a version earlier than 0.4.0, the password was not stored: the next time
+the token expires, Home Assistant asks for it once, and from then on the renewal is
+automatic.
 
 ### 4. Choose the calendars
 

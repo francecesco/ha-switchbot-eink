@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "SwitchBot E-Ink Home Dashboard",
-        "description": "Sign in with your SwitchBot account. Your password is not stored — only the refresh token is kept.",
+        "description": "Sign in with your SwitchBot account. The password is stored in Home Assistant: it is used to renew the session on its own when the token expires.",
         "data": {
           "username": "Email",
           "password": "Password",
@@ -18,7 +18,7 @@
       },
       "reauth_confirm": {
         "title": "Sign in again",
-        "description": "The token for {username} is no longer valid. Enter the password to renew it.",
+        "description": "The session for {username} is no longer valid and the automatic renewal failed. Enter the password: from now on it is stored and the renewal is automatic.",
         "data": {
           "password": "Password"
         }

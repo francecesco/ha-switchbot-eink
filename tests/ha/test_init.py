@@ -386,3 +386,44 @@ async def test_lintegrazione_porta_con_se_la_sua_icona(hass: HomeAssistant) -> N
         "logo.png", "logo@2x.png", "dark_logo.png", "dark_logo@2x.png",
     ):
         assert (cartella / nome).is_file(), nome
+
+
+async def test_la_password_salvata_arriva_al_client_per_il_login_automatico(
+    hass: HomeAssistant,
+) -> None:
+    from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+
+    from custom_components.switchbot_eink.api.auth import Credentials
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="DEV1",
+        data={**DATI, CONF_USERNAME: "mario@example.test", CONF_PASSWORD: "segreta"},
+    )
+    entry.add_to_hass(hass)
+
+    with patch(PERCORSO_CLIENT) as client_cls:
+        _mock_client(client_cls)
+        with patch(PERCORSO_PUBLISH, AsyncMock(return_value=True)):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+    assert client_cls.call_args.kwargs["credentials"] == Credentials(
+        username="mario@example.test", password="segreta"
+    )
+
+
+async def test_senza_password_salvata_il_client_non_riceve_credenziali(
+    hass: HomeAssistant, entry
+) -> None:
+    """Entry create prima del salvataggio della password: nessun login
+    automatico, il reauth la chiedera' una volta."""
+    entry.add_to_hass(hass)
+
+    with patch(PERCORSO_CLIENT) as client_cls:
+        _mock_client(client_cls)
+        with patch(PERCORSO_PUBLISH, AsyncMock(return_value=True)):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+
+    assert client_cls.call_args.kwargs["credentials"] is None

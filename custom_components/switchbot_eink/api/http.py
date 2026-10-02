@@ -14,7 +14,7 @@ Unwrapper = Callable[[object], Any]
 
 
 class CanvasHttp:
-    """POST JSON verso un base URL, con un solo tentativo di refresh su 401."""
+    """POST JSON verso un base URL, con un solo tentativo di refresh se non autorizzato."""
 
     def __init__(
         self,
@@ -31,18 +31,28 @@ class CanvasHttp:
         self._on_unauthorized = on_unauthorized
 
     async def request(self, path: str, body: dict[str, Any] | None = None) -> Any:
+        """Una richiesta, con un solo rinnovo del token se non e' autorizzata.
+
+        "Non autorizzata" vale sia per un HTTP 401 sia per un `resultCode` 401
+        dentro un HTTP 200: il backend usa entrambe le forme, e l'editor web
+        ufficiale le tratta allo stesso modo.
+        """
+        try:
+            return await self._request_once(path, body)
+        except SwitchBotCanvasAuthError:
+            if self._on_unauthorized is None:
+                raise
+
+        if not await self._on_unauthorized():
+            raise SwitchBotCanvasAuthError("Rinnovo del token fallito")
+        return await self._request_once(path, body)
+
+    async def _request_once(self, path: str, body: dict[str, Any] | None) -> Any:
         status, payload = await self._post_once(path, body)
-
-        if status == 401 and self._on_unauthorized is not None:
-            if not await self._on_unauthorized():
-                raise SwitchBotCanvasAuthError("Refresh del token fallito")
-            status, payload = await self._post_once(path, body)
-
         if status == 401:
             raise SwitchBotCanvasAuthError("Il backend ha risposto 401")
         if status >= 400:
             raise SwitchBotCanvasApiError(status, f"HTTP {status}")
-
         return self._unwrap(payload)
 
     async def _post_once(

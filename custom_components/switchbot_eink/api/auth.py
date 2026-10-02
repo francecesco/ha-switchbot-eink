@@ -29,6 +29,19 @@ class Tokens:
 
 
 @dataclass(frozen=True, slots=True)
+class Credentials:
+    """Email e password dell'account, per rifare il login senza l'utente.
+
+    Il refresh token ha una vita limitata e `/token/refresh` non ne restituisce
+    mai uno nuovo (verificato nel bundle dell'editor web ufficiale): quando
+    scade, l'unico modo di ottenere token nuovi e' un login completo.
+    """
+
+    username: str
+    password: str
+
+
+@dataclass(frozen=True, slots=True)
 class UserInfo:
     """Identità dell'utente autenticato."""
 

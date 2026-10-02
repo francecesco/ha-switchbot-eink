@@ -1,11 +1,12 @@
 """Facciata unica sull'API privata del canvas."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import aiohttp
 
-from .auth import CanvasAuth, Tokens
+from .auth import CanvasAuth, Credentials, Tokens
 from .const import (
     DEVICE_TYPE_EINK,
     PATH_DEVICE_LIST,
@@ -23,9 +24,16 @@ from .envelope import build_auth_header, device_base_url, productbiz_base_url, u
 from .http import CanvasHttp
 from .models import Device, Template, TemplateSummary, sort_order_to_page_slot
 
+_LOGGER = logging.getLogger(__name__)
+
 
 class SwitchBotCanvasClient:
-    """Dispositivi e template. Rinnova il token da solo quando scade."""
+    """Dispositivi e template. Rinnova il token da solo quando scade.
+
+    Con `credentials` rifa' anche il login quando il refresh token non vale
+    piu': senza, quel caso risale come `SwitchBotCanvasAuthError` e tocca
+    all'utente reinserire la password.
+    """
 
     def __init__(
         self,
@@ -33,10 +41,12 @@ class SwitchBotCanvasClient:
         region: str,
         tokens: Tokens,
         user_id: str,
+        credentials: Credentials | None = None,
     ) -> None:
         self._region = region
         self._tokens = tokens
         self._user_id = user_id
+        self._credentials = credentials
         self._auth = CanvasAuth(session, region)
         self._http = CanvasHttp(
             session,
@@ -64,11 +74,36 @@ class SwitchBotCanvasClient:
         )
 
     async def _try_refresh(self) -> bool:
+        """Rinnova l'access token; se il refresh token e' scaduto, rifa' il login.
+
+        Il motivo di ogni fallimento va nei log: e' l'unica traccia che resta
+        quando l'utente trova il reauth al mattino.
+        """
         try:
             self._tokens = await self._auth.refresh(
                 self._user_id, self._tokens.refresh_token
             )
-        except Exception:  # noqa: BLE001 — qualsiasi fallimento significa "rifai il login"
+            return True
+        except Exception as err:  # noqa: BLE001 — qualsiasi fallimento significa "rifai il login"
+            if self._credentials is None:
+                _LOGGER.warning(
+                    "Rinnovo del token fallito (%s) e password non salvata: "
+                    "serve un nuovo accesso",
+                    err,
+                )
+                return False
+            _LOGGER.info(
+                "Rinnovo del token fallito (%s): rifaccio il login con la "
+                "password salvata",
+                err,
+            )
+
+        try:
+            self._tokens = await self._auth.login(
+                self._credentials.username, self._credentials.password
+            )
+        except Exception as err:  # noqa: BLE001 — password cambiata o backend giu'
+            _LOGGER.warning("Login automatico fallito: %s", err)
             return False
         return True
 

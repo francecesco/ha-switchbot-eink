@@ -145,3 +145,35 @@ async def test_errore_http_generico_solleva_api_error(aioclient, session) -> Non
 
     with pytest.raises(SwitchBotCanvasApiError):
         await http.request("/ping")
+
+
+async def test_401_nell_envelope_tenta_il_refresh_come_un_401_http(aioclient, session) -> None:
+    """Il backend puo' segnalare il token scaduto anche con HTTP 200 e
+    `resultCode` 401: senza questo ramo il rinnovo non partirebbe mai."""
+    chiamate: list[str] = []
+
+    async def refresh() -> bool:
+        chiamate.append("refresh")
+        return True
+
+    aioclient.post(
+        PING,
+        side_effect=response_sequence(
+            json_response({"resultCode": 401, "message": "token expired"}),
+            json_response({"resultCode": 100, "data": {"ok": True}}),
+        ),
+    )
+    http = CanvasHttp(
+        session, BASE, unwrap_backend, auth_provider=lambda: "tok", on_unauthorized=refresh
+    )
+
+    assert await http.request("/ping") == {"ok": True}
+    assert chiamate == ["refresh"]
+
+
+async def test_401_nell_envelope_senza_refresh_solleva_auth_error(aioclient, session) -> None:
+    aioclient.post(PING, json={"resultCode": 401, "message": "token expired"})
+    http = CanvasHttp(session, BASE, unwrap_backend, auth_provider=lambda: "tok")
+
+    with pytest.raises(SwitchBotCanvasAuthError):
+        await http.request("/ping")

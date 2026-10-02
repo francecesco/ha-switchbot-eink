@@ -5,14 +5,14 @@ import logging
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import Platform
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
-from .api.auth import Tokens
+from .api.auth import Credentials, Tokens
 from .api.client import SwitchBotCanvasClient
 from .const import (
     CONF_ACCESS_TOKEN,
@@ -64,11 +64,19 @@ async def async_setup_entry(
         refresh_token=entry.data[CONF_REFRESH_TOKEN],
         token_type=entry.data.get(CONF_TOKEN_TYPE, "Bearer"),
     )
+    # Le entry create prima della 0.4.0 non hanno la password: per loro il
+    # reauth la chiede una volta e da li' in poi il login e' automatico.
+    credenziali = (
+        Credentials(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
+        if entry.data.get(CONF_PASSWORD)
+        else None
+    )
     client = SwitchBotCanvasClient(
         async_get_clientsession(hass),
         entry.data[CONF_REGION],
         tokens,
         entry.data[CONF_USER_ID],
+        credentials=credenziali,
     )
 
     coordinator = SwitchBotEinkCoordinator(hass, entry, client)

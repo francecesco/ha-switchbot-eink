@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "SwitchBot E-Ink Home Dashboard",
-        "description": "Accedi con il tuo account SwitchBot. La password non viene salvata: viene conservato solo il token di rinnovo.",
+        "description": "Accedi con il tuo account SwitchBot. La password viene salvata in Home Assistant: serve a rinnovare l'accesso da solo quando il token scade.",
         "data": {
           "username": "Email",
           "password": "Password",
@@ -18,7 +18,7 @@
       },
       "reauth_confirm": {
         "title": "Accedi di nuovo",
-        "description": "Il token di {username} non è più valido. Inserisci la password per rinnovarlo.",
+        "description": "L'accesso di {username} non è più valido e il rinnovo automatico non è riuscito. Inserisci la password: da ora in poi verrà salvata e il rinnovo sarà automatico.",
         "data": {
           "password": "Password"
         }

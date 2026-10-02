@@ -52,7 +52,8 @@ STEP_REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_PASSWORD): str})
 
 
 class SwitchBotEinkConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Login, scelta del pannello, e nessuna password su disco."""
+    """Login, scelta del pannello. La password resta nella entry: serve al
+    login automatico quando il refresh token scade (vedi `api.client`)."""
 
     VERSION = 1
 
@@ -61,6 +62,7 @@ class SwitchBotEinkConfigFlow(ConfigFlow, domain=DOMAIN):
         self._user_id: str | None = None
         self._region: str = "eu"
         self._username: str = ""
+        self._password: str = ""
         self._devices: list[Device] = []
 
     @staticmethod
@@ -117,6 +119,7 @@ class SwitchBotEinkConfigFlow(ConfigFlow, domain=DOMAIN):
 
         self._region = region
         self._username = user_input[CONF_USERNAME]
+        self._password = user_input[CONF_PASSWORD]
         self._tokens = tokens
         self._user_id = info.user_id
         self._devices = devices
@@ -155,6 +158,7 @@ class SwitchBotEinkConfigFlow(ConfigFlow, domain=DOMAIN):
             data={
                 CONF_REGION: self._region,
                 CONF_USERNAME: self._username,
+                CONF_PASSWORD: self._password,
                 CONF_ACCESS_TOKEN: self._tokens.access_token,
                 CONF_REFRESH_TOKEN: self._tokens.refresh_token,
                 CONF_TOKEN_TYPE: self._tokens.token_type,
@@ -167,13 +171,14 @@ class SwitchBotEinkConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(
         self, entry_data: Mapping[str, Any]
     ) -> ConfigFlowResult:
-        """Il refresh token non è più valido: serve di nuovo la password."""
+        """Refresh token scaduto e login automatico fallito (o password mai
+        salvata, per le entry create prima della 0.4.0): serve la password."""
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Rifà il login e riscrive i soli token, senza toccare il resto."""
+        """Rifà il login e riscrive token e password, senza toccare il resto."""
         entry = self._get_reauth_entry()
 
         if user_input is None:
@@ -221,6 +226,7 @@ class SwitchBotEinkConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_update_reload_and_abort(
             entry,
             data_updates={
+                CONF_PASSWORD: user_input[CONF_PASSWORD],
                 CONF_ACCESS_TOKEN: tokens.access_token,
                 CONF_REFRESH_TOKEN: tokens.refresh_token,
                 CONF_TOKEN_TYPE: tokens.token_type,
